@@ -18,7 +18,7 @@ import {
 import * as d3 from 'd3';
 import ReactMarkdown from 'react-markdown';
 import { motion, AnimatePresence } from 'motion/react';
-import { getMatchInsights, MatchInsights } from './lib/geminiService';
+import { getMatchInsights, MatchInsights, askGemini } from './lib/geminiService';
 import { PredictionSignal } from './lib/fixtureParser';
 import { LeagueStat, ViewState } from './types';
 
@@ -164,6 +164,9 @@ export default function App() {
 
   const [monteCarloResult, setMonteCarloResult] = useState<MonteCarloResult | null>(null);
   const [isSimulating, setIsSimulating] = useState(false);
+  const [geminiPrompt, setGeminiPrompt] = useState('');
+  const [geminiResponse, setGeminiResponse] = useState('');
+  const [isGeminiLoading, setIsGeminiLoading] = useState(false);
 
 
 
@@ -292,6 +295,14 @@ export default function App() {
         isSimulating: false
       });
     }, 1500);
+  };
+
+  const handleGeminiAsk = async (mode: 'thinking' | 'search' | 'general') => {
+    setIsGeminiLoading(true);
+    setGeminiResponse('Thinking...');
+    const response = await askGemini(geminiPrompt, mode);
+    setGeminiResponse(response);
+    setIsGeminiLoading(false);
   };
 
 
@@ -1020,6 +1031,26 @@ export default function App() {
                         <p className="text-slate-500 text-sm">Run a simulation to validate model performance over 3 seasons.</p>
                       </div>
                     )}
+                  </div>
+
+                  {/* Gemini Intelligence Section */}
+                  <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8">
+                    <h3 className="text-xl font-bold text-white mb-4">Gemini Intelligence</h3>
+                    <div className="flex gap-4 mb-4">
+                      <input 
+                        type="text" 
+                        value={geminiPrompt}
+                        onChange={(e) => setGeminiPrompt(e.target.value)}
+                        className="flex-1 bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-white focus:border-blue-500 focus:outline-none"
+                        placeholder="Ask Gemini for insights..."
+                      />
+                      <button onClick={() => handleGeminiAsk('general')} className="bg-blue-600 text-white px-4 py-2 rounded-xl text-xs font-bold hover:bg-blue-700 transition-all">Ask</button>
+                      <button onClick={() => handleGeminiAsk('thinking')} className="bg-purple-600 text-white px-4 py-2 rounded-xl text-xs font-bold hover:bg-purple-700 transition-all">Think</button>
+                      <button onClick={() => handleGeminiAsk('search')} className="bg-green-600 text-white px-4 py-2 rounded-xl text-xs font-bold hover:bg-green-700 transition-all">Search</button>
+                    </div>
+                    <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 text-sm text-slate-300 min-h-[100px]">
+                      {isGeminiLoading ? 'Thinking...' : (geminiResponse || "Gemini's response will appear here...")}
+                    </div>
                   </div>
 
                   <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8">
