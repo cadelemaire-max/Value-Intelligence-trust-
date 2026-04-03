@@ -137,7 +137,6 @@ const MatchDetailPage: React.FC<MatchDetailPageProps> = ({
               <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-4">Kickoff Today</p>
             </>
           )}
-          {status !== 'FINISHED' && <h1 className="text-2xl font-black text-white tracking-tight">{awayTeam}</h1>}
         </div>
       </div>
 

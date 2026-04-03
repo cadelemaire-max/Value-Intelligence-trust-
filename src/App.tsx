@@ -389,17 +389,31 @@ export default function App() {
             const upcomingData = await upcomingRes.json();
             if (Array.isArray(upcomingData)) {
               fixtures = upcomingData.map((match: any, index: number) => {
-                const probability = 0.4 + Math.random() * 0.4;
-                const odds = 1.5 + Math.random() * 2.5;
-                const ev = (probability * odds) - 1;
-                const kelly = Math.max(0, (ev / (odds - 1)) * 0.1);
-                const markets = ["Over 2.5", "Home Win", "BTTS - Yes", "Away Win", "Under 2.5"];
-                const movements: ('up' | 'down' | 'stable')[] = ['up', 'down', 'stable'];
                 const homeMetrics = allTeamsMetrics[match.homeTeam];
                 const awayMetrics = allTeamsMetrics[match.awayTeam];
                 const homeXG = homeMetrics ? homeMetrics.avgGoalsScored : 1.2;
                 const awayXG = awayMetrics ? awayMetrics.avgGoalsScored : 1.1;
-                return { id: match.id || `api-${index}`, homeTeam: match.homeTeam, awayTeam: match.awayTeam, league: match.league, market: match.market || markets[Math.floor(Math.random() * markets.length)], probability: parseFloat(probability.toFixed(2)), odds: parseFloat(odds.toFixed(2)), ev: parseFloat(ev.toFixed(3)), kelly: parseFloat(kelly.toFixed(3)), confidence: parseFloat((0.6 + Math.random() * 0.35).toFixed(2)), agreement: parseFloat((0.5 + Math.random() * 0.5).toFixed(2)), kickoffTime: match.kickoffTime, oddsMovement: match.oddsMovement || movements[Math.floor(Math.random() * movements.length)], status: match.status, score: match.score, homeXG: parseFloat(homeXG.toFixed(2)), awayXG: parseFloat(awayXG.toFixed(2)) };
+                // Derive probability from Poisson xG model
+                const poissonProb = (() => {
+                  const hx = homeXG; const ax = awayXG;
+                  let hw = 0, dr = 0;
+                  for (let i = 0; i <= 6; i++) for (let j = 0; j <= 6; j++) {
+                    const p = (Math.pow(hx,i)*Math.exp(-hx)/[1,1,2,6,24,120,720][i]) * (Math.pow(ax,j)*Math.exp(-ax)/[1,1,2,6,24,120,720][j]);
+                    if (i > j) hw += p; else if (i === j) dr += p;
+                  }
+                  return Math.max(0.1, Math.min(0.85, hw + dr * 0.4));
+                })();
+                const probability = poissonProb;
+                const impliedOdds = parseFloat((1 / probability * 1.08).toFixed(2)); // 8% bookmaker margin
+                const odds = match.odds ? Number(match.odds) : impliedOdds;
+                const rawEV = (probability * odds) - 1;
+                const ev = Math.max(-0.15, Math.min(0.22, rawEV * 0.55)); // shrink + cap at 22%
+                const kelly = calculateKelly(probability, odds, { bankroll: 1000, fractionalKelly: 0.25, maxBetPercentage: 0.05, minEdgeThreshold: 0.02, minConfidenceFloor: 0.65 }, 0.75, 10).fraction;
+                const markets = ["Over 2.5", "Home Win", "BTTS - Yes", "Away Win", "Under 2.5", "1X (Home/Draw)", "X2 (Draw/Away)", "Double Chance"];
+                const movements: ('up' | 'down' | 'stable')[] = ['up', 'down', 'stable'];
+                // Pick most likely market based on xG
+                const suggestedMarket = homeXG + awayXG > 2.6 ? "Over 2.5" : homeXG > awayXG * 1.3 ? "Home Win" : homeXG + awayXG > 2.0 ? "BTTS - Yes" : "Under 2.5";
+                return { id: match.id || `api-${index}`, homeTeam: match.homeTeam, awayTeam: match.awayTeam, league: match.league, market: match.market || suggestedMarket, probability: parseFloat(probability.toFixed(2)), odds: parseFloat(odds.toFixed(2)), ev: parseFloat(ev.toFixed(3)), kelly: parseFloat(kelly.toFixed(3)), confidence: parseFloat(Math.max(0.55, Math.min(0.9, 0.6 + probability * 0.3)).toFixed(2)), agreement: parseFloat(Math.max(0.5, Math.min(0.9, 0.65 + Math.random() * 0.2)).toFixed(2)), kickoffTime: match.kickoffTime, oddsMovement: match.oddsMovement || movements[Math.floor(Math.random() * movements.length)], status: match.status, score: match.score, homeXG: parseFloat(homeXG.toFixed(2)), awayXG: parseFloat(awayXG.toFixed(2)) };
               });
             }
           }
@@ -417,6 +431,27 @@ export default function App() {
       }
     };
     loadData();
+  }, []);
+
+  // Auto-refresh fixture statuses every 60 seconds for live score updates
+  useEffect(() => {
+    const refreshScores = async () => {
+      try {
+        const res = await fetch('/api/matches/upcoming');
+        if (!res.ok) return;
+        const freshData = await res.json();
+        if (!Array.isArray(freshData)) return;
+        setSignals(prev => prev.map(existing => {
+          const fresh = freshData.find((m: any) => String(m.id) === String(existing.id));
+          if (!fresh) return existing;
+          return { ...existing, status: fresh.status ?? existing.status, score: fresh.score ?? existing.score };
+        }));
+      } catch {
+        // Silently ignore refresh errors
+      }
+    };
+    const interval = setInterval(refreshScores, 60_000);
+    return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {
@@ -605,7 +640,9 @@ export default function App() {
                   <div className="w-px h-10 bg-slate-800" />
                   <div className="text-right">
                     <p className="text-[10px] font-bold text-slate-500 uppercase">Unrealized P&L</p>
-                    <p className="text-xl font-mono font-bold text-green-400">+1.82u</p>
+                    <p className={cn("text-xl font-mono font-bold", contextActiveBets.reduce((acc, b) => acc + b.stake * ((b.probability || 0.5) * (b.odds || 2) - 1), 0) >= 0 ? "text-green-400" : "text-red-400")}>
+                      {contextActiveBets.reduce((acc, b) => acc + b.stake * ((b.probability || 0.5) * (b.odds || 2) - 1), 0) >= 0 ? '+' : ''}{contextActiveBets.reduce((acc, b) => acc + b.stake * ((b.probability || 0.5) * (b.odds || 2) - 1), 0).toFixed(2)}u
+                    </p>
                   </div>
                 </div>
               </div>
@@ -645,6 +682,180 @@ export default function App() {
                   </div>
                 </div>
               </div>
+            </motion.div>
+          )}
+
+          {view === 'analytics' && (
+            <motion.div key="analytics" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="max-w-7xl mx-auto space-y-8">
+              <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[0.35em] text-blue-400">Model intelligence</p>
+                  <h2 className="text-3xl font-black text-white mt-2">Analytics</h2>
+                  <p className="text-slate-400 mt-2">Live performance metrics, calibration diagnostics, and backtest simulation.</p>
+                </div>
+                <button onClick={runBacktestSimulation} disabled={backtestResults?.isSimulating} className={cn("px-6 py-3 rounded-2xl font-black text-sm transition-all flex items-center gap-2", backtestResults?.isSimulating ? "bg-slate-800 text-slate-500 cursor-not-allowed" : "bg-blue-600 text-white hover:bg-blue-500 shadow-lg shadow-blue-600/20")}>
+                  {backtestResults?.isSimulating ? <><Activity size={16} className="animate-spin" /><span>Running…</span></> : <><Zap size={16} /><span>Run Backtest</span></>}
+                </button>
+              </div>
+
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                {[
+                  { label: 'Live ROI', value: `${(realTimePerf?.roi ?? 0).toFixed(1)}%`, color: 'text-green-400', sub: `${realTimePerf?.totalBets ?? 0} bets tracked` },
+                  { label: 'Win Rate', value: `${Math.round(realTimePerf?.winRate ?? 0)}%`, color: 'text-blue-400', sub: 'settled bets' },
+                  { label: 'Brier Score', value: (realTimePerf?.brierScore ?? 0).toFixed(3), color: 'text-purple-400', sub: '< 0.25 is good' },
+                  { label: 'AUC-ROC', value: (realTimePerf?.auc ?? 0.5).toFixed(3), color: 'text-orange-400', sub: '> 0.6 is good' },
+                ].map(item => (
+                  <div key={item.label} className="bg-slate-900 border border-slate-800 rounded-3xl p-6">
+                    <p className="text-[10px] font-bold text-slate-500 uppercase mb-2">{item.label}</p>
+                    <p className={cn("text-3xl font-black", item.color)}>{item.value}</p>
+                    <p className="text-[10px] text-slate-600 mt-2">{item.sub}</p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <div>
+                      <h3 className="font-black text-white">Calibration Curve</h3>
+                      <p className="text-xs text-slate-500 mt-1">Perfect calibration = diagonal line</p>
+                    </div>
+                    {backtestResults && !backtestResults.isSimulating && <span className="text-[10px] font-black text-green-400 uppercase">Brier: {backtestResults.brierScore.toFixed(3)}</span>}
+                  </div>
+                  {backtestResults?.calibrationData && backtestResults.calibrationData.length > 0 ? (
+                    <ResponsiveContainer width="100%" height={220}>
+                      <LineChart data={backtestResults.calibrationData}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+                        <XAxis dataKey="bin" tickFormatter={(v: number) => `${(v*100).toFixed(0)}%`} tick={{ fill: '#475569', fontSize: 11 }} />
+                        <YAxis tickFormatter={(v: number) => `${(v*100).toFixed(0)}%`} tick={{ fill: '#475569', fontSize: 11 }} />
+                        <Tooltip formatter={(v: any) => `${(Number(v)*100).toFixed(1)}%`} contentStyle={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 12 }} />
+                        <Line type="monotone" dataKey="predictedProb" stroke="#3b82f6" strokeWidth={2} dot={false} name="Predicted" />
+                        <Line type="monotone" dataKey="actualRate" stroke="#22c55e" strokeWidth={2} dot={false} name="Actual" />
+                        <Line type="monotone" dataKey="bin" stroke="#475569" strokeDasharray="5 5" dot={false} name="Perfect" />
+                        <Legend formatter={(v: string) => <span className="text-xs text-slate-400">{v}</span>} />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center h-[220px] gap-3 text-slate-600">
+                      <Brain size={32} />
+                      <p className="text-sm">Run backtest to see calibration curve</p>
+                    </div>
+                  )}
+                </div>
+
+                <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6">
+                  <h3 className="font-black text-white mb-4">Market Distribution</h3>
+                  {signals.length > 0 ? (() => {
+                    const counts = signals.reduce((acc, s) => { acc[s.market] = (acc[s.market] || 0) + 1; return acc; }, {} as Record<string,number>);
+                    const data = Object.entries(counts).map(([name, value]) => ({ name, value }));
+                    const COLORS = ['#3b82f6','#22c55e','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#ec4899','#84cc16'];
+                    return (
+                      <ResponsiveContainer width="100%" height={220}>
+                        <PieChart>
+                          <Pie data={data} cx="50%" cy="50%" innerRadius={55} outerRadius={90} paddingAngle={3} dataKey="value">
+                            {data.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                          </Pie>
+                          <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 12 }} />
+                          <Legend formatter={(v: string) => <span className="text-[10px] text-slate-400">{v}</span>} />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    );
+                  })() : <div className="flex items-center justify-center h-[220px] text-slate-600 text-sm">Load fixtures to see market split</div>}
+                </div>
+
+                <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6">
+                  <h3 className="font-black text-white mb-4">Signal Count by League</h3>
+                  {signals.length > 0 ? (() => {
+                    const counts = signals.reduce((acc, s) => { const l = s.league || 'Unknown'; acc[l] = (acc[l] || 0) + 1; return acc; }, {} as Record<string,number>);
+                    const data = Object.entries(counts).sort((a,b) => b[1] - a[1]).slice(0, 8).map(([name, count]) => ({ name, count }));
+                    return (
+                      <ResponsiveContainer width="100%" height={220}>
+                        <BarChart data={data} layout="vertical" margin={{ left: 8 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+                          <XAxis type="number" tick={{ fill: '#475569', fontSize: 11 }} />
+                          <YAxis type="category" dataKey="name" width={110} tick={{ fill: '#94a3b8', fontSize: 10 }} />
+                          <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 12 }} />
+                          <Bar dataKey="count" fill="#3b82f6" radius={[0, 4, 4, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    );
+                  })() : <div className="flex items-center justify-center h-[220px] text-slate-600 text-sm">Load fixtures to see league breakdown</div>}
+                </div>
+
+                <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="font-black text-white">Backtest Results</h3>
+                    {backtestResults && !backtestResults.isSimulating && <span className="text-[10px] font-black text-green-400 uppercase tracking-widest">Complete</span>}
+                  </div>
+                  {backtestResults?.isSimulating ? (
+                    <div className="flex items-center justify-center h-[160px] gap-3 text-blue-400">
+                      <Activity size={24} className="animate-spin" />
+                      <span className="font-bold">Running simulation…</span>
+                    </div>
+                  ) : backtestResults ? (
+                    <div className="space-y-3">
+                      {[
+                        { label: 'Simulated ROI', value: `${backtestResults.roi.toFixed(1)}%`, positive: backtestResults.roi > 0 },
+                        { label: 'Max Drawdown', value: `${backtestResults.maxDrawdown.toFixed(1)}%`, positive: false },
+                        { label: 'Brier Score', value: backtestResults.brierScore.toFixed(4), positive: backtestResults.brierScore < 0.25 },
+                        { label: 'AUC-ROC', value: backtestResults.auc.toFixed(3), positive: backtestResults.auc > 0.6 },
+                      ].map(item => (
+                        <div key={item.label} className="flex justify-between items-center py-2 border-b border-slate-800 last:border-0">
+                          <span className="text-sm text-slate-400">{item.label}</span>
+                          <span className={cn("font-black font-mono text-sm", item.positive ? 'text-green-400' : 'text-red-400')}>{item.value}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center h-[160px] gap-3 text-slate-600">
+                      <Calculator size={32} />
+                      <p className="text-sm">Click Run Backtest to simulate</p>
+                    </div>
+                  )}
+
+                  <div className="mt-6 pt-6 border-t border-slate-800">
+                    <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-4">Model Stack</h4>
+                    <div className="space-y-2">
+                      {[
+                        { name: 'Poisson Model', status: 'Ready', color: 'text-green-400' },
+                        { name: 'Random Forest', status: 'Lazy init', color: 'text-blue-400' },
+                        { name: 'Bayesian Engine', status: 'Adaptive', color: 'text-blue-400' },
+                        { name: 'Monte Carlo', status: '10k iterations', color: 'text-orange-400' },
+                        { name: 'Gemini AI', status: 'Enabled', color: 'text-purple-400' },
+                      ].map(m => (
+                        <div key={m.name} className="flex justify-between text-sm">
+                          <span className="text-slate-400">{m.name}</span>
+                          <span className={cn("font-bold text-xs", m.color)}>{m.status}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {contextHistory.length > 0 && (
+                <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6">
+                  <h3 className="font-black text-white mb-4">Recent Bet History</h3>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left">
+                      <thead className="text-[10px] font-bold text-slate-500 uppercase tracking-widest border-b border-slate-800">
+                        <tr><th className="pb-3 pr-6">Match</th><th className="pb-3 pr-6">Market</th><th className="pb-3 pr-6">Probability</th><th className="pb-3 pr-6">Odds</th><th className="pb-3">P&L</th></tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800/50">
+                        {contextHistory.slice(-10).reverse().map(bet => (
+                          <tr key={bet.id} className="hover:bg-slate-800/20 transition-colors">
+                            <td className="py-3 pr-6 text-sm font-bold text-white">{bet.homeTeam} vs {bet.awayTeam}</td>
+                            <td className="py-3 pr-6 text-xs text-slate-400">{bet.market}</td>
+                            <td className="py-3 pr-6 text-xs font-mono text-slate-300">{((bet.probability || 0.5)*100).toFixed(0)}%</td>
+                            <td className="py-3 pr-6 text-xs font-mono text-slate-300">{(bet.odds || 2).toFixed(2)}</td>
+                            <td className={cn("py-3 text-sm font-black font-mono", bet.profit > 0 ? 'text-green-400' : 'text-red-400')}>{bet.profit > 0 ? '+' : ''}{bet.profit.toFixed(2)}u</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
             </motion.div>
           )}
         </AnimatePresence>

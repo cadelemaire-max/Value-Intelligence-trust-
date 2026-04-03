@@ -412,39 +412,62 @@ async function startServer() {
     const apiKey = process.env.FOOTBALL_DATA_API_KEY;
     
     try {
-      if (apiKey) {
-        // Fetch real matches for the next 7 days
-        const dateFrom = new Date().toISOString().split('T')[0];
-        const dateTo = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-        
-        const response = await axios.get(`https://api.football-data.org/v4/matches?dateFrom=${dateFrom}&dateTo=${dateTo}`, {
-          headers: { 'X-Auth-Token': apiKey }
-        });
+      const csvFallback = () => {
+        const csvPath = path.join(__dirname, 'public', 'all_fixtures.csv');
+        const csvData = fs.readFileSync(csvPath, 'utf8');
+        const parsed = Papa.parse(csvData, { header: true }).data as any[];
+        return parsed.filter((m: any) => m.homeTeam && m.awayTeam);
+      };
 
-        const matches = response.data.matches.map((match: any) => ({
-          id: String(match.id),
-          homeTeam: match.homeTeam.name,
-          awayTeam: match.awayTeam.name,
-          league: match.competition.name,
-          kickoffTime: match.utcDate,
-          status: match.status,
-          score: match.score.fullTime
-        }));
+      if (apiKey) {
+        // Fetch next 14 days across all supported competitions
+        const dateFrom = new Date().toISOString().split('T')[0];
+        const dateTo = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+        const competitions = ['PL', 'BL1', 'PD', 'SA', 'FL1', 'ELC', 'CL'];
         
-        return res.json(matches);
+        const responses = await Promise.allSettled(
+          competitions.map(comp =>
+            axios.get(`https://api.football-data.org/v4/competitions/${comp}/matches`, {
+              headers: { 'X-Auth-Token': apiKey },
+              params: { status: 'SCHEDULED,LIVE,IN_PLAY,FINISHED', dateFrom, dateTo }
+            })
+          )
+        );
+
+        const allMatches = responses
+          .filter((r): r is PromiseFulfilledResult<any> => r.status === 'fulfilled')
+          .flatMap(r => (r.value.data.matches || []))
+          .map((match: any) => ({
+            id: String(match.id),
+            homeTeam: match.homeTeam?.name || '',
+            awayTeam: match.awayTeam?.name || '',
+            league: match.competition?.name || '',
+            kickoffTime: match.utcDate,
+            status: match.status,
+            score: match.score?.fullTime || null,
+            odds: null
+          }))
+          .filter(m => m.homeTeam && m.awayTeam);
+
+        if (allMatches.length > 0) {
+          return res.json(allMatches);
+        }
+        // No matches from API — fall through to CSV
       }
 
       // Fallback to CSV
-      const csvData = fs.readFileSync('all_fixtures.csv', 'utf8');
-      const parsed = Papa.parse(csvData, { header: true }).data as any[];
-      res.json(parsed.filter(m => m.homeTeam && m.awayTeam));
+      try {
+        res.json(csvFallback());
+      } catch (csvError) {
+        res.status(500).json({ error: "Internal Server Error" });
+      }
     } catch (error) {
       console.error("Upcoming Matches Error:", error);
-      // Fallback to CSV on error
       try {
-        const csvData = fs.readFileSync('all_fixtures.csv', 'utf8');
+        const csvPath = path.join(__dirname, 'public', 'all_fixtures.csv');
+        const csvData = fs.readFileSync(csvPath, 'utf8');
         const parsed = Papa.parse(csvData, { header: true }).data as any[];
-        res.json(parsed.filter(m => m.homeTeam && m.awayTeam));
+        res.json(parsed.filter((m: any) => m.homeTeam && m.awayTeam));
       } catch (csvError) {
         res.status(500).json({ error: "Internal Server Error" });
       }
