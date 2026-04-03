@@ -63,26 +63,6 @@ interface BetslipItem {
   odds: number;
 }
 
-const BET_HISTORY: BetHistory[] = [
-  { id: 'h1', match: 'Arsenal vs Chelsea', market: 'Home Win', stake: 100, odds: 1.85, outcome: 'won', profit: 85, date: '2026-03-28', probability: 0.65 },
-  { id: 'h2', match: 'Inter vs Milan', market: 'BTTS', stake: 50, odds: 1.70, outcome: 'lost', profit: -50, date: '2026-03-29', probability: 0.58 },
-  { id: 'h3', match: 'Luton vs Everton', market: 'Under 2.5', stake: 75, odds: 2.10, outcome: 'won', profit: 82.5, date: '2026-03-30', probability: 0.52 },
-];
-
-const ROI_DATA = [
-  { date: 'Mar 01', roi: 2.1 }, { date: 'Mar 05', roi: 4.5 }, { date: 'Mar 10', roi: 3.8 },
-  { date: 'Mar 15', roi: 7.2 }, { date: 'Mar 20', roi: 6.1 }, { date: 'Mar 25', roi: 9.4 },
-  { date: 'Apr 01', roi: 12.4 },
-];
-
-const RADAR_DATA = [
-  { subject: 'Attack', A: 120, B: 110, fullMark: 150 },
-  { subject: 'Defense', A: 98, B: 130, fullMark: 150 },
-  { subject: 'Possession', A: 86, B: 130, fullMark: 150 },
-  { subject: 'Set Pieces', A: 99, B: 100, fullMark: 150 },
-  { subject: 'Discipline', A: 85, B: 90, fullMark: 150 },
-];
-
 const StatCard = ({ title, value, trend, icon: Icon, color }: any) => (
   <div className="bg-slate-900 border border-slate-800 p-6 rounded-3xl relative overflow-hidden group">
     <div className={cn("absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity", color)}>
@@ -419,7 +399,7 @@ export default function App() {
                 const awayMetrics = allTeamsMetrics[match.awayTeam];
                 const homeXG = homeMetrics ? homeMetrics.avgGoalsScored : 1.2;
                 const awayXG = awayMetrics ? awayMetrics.avgGoalsScored : 1.1;
-                return { id: match.id || `api-${index}`, homeTeam: match.homeTeam, awayTeam: match.awayTeam, league: match.league, market: markets[Math.floor(Math.random() * markets.length)], probability: parseFloat(probability.toFixed(2)), odds: parseFloat(odds.toFixed(2)), ev: parseFloat(ev.toFixed(3)), kelly: parseFloat(kelly.toFixed(3)), confidence: parseFloat((0.6 + Math.random() * 0.35).toFixed(2)), agreement: parseFloat((0.5 + Math.random() * 0.5).toFixed(2)), kickoffTime: match.kickoffTime, oddsMovement: movements[Math.floor(Math.random() * movements.length)], status: match.status, score: match.score, homeXG: parseFloat(homeXG.toFixed(2)), awayXG: parseFloat(awayXG.toFixed(2)) };
+                return { id: match.id || `api-${index}`, homeTeam: match.homeTeam, awayTeam: match.awayTeam, league: match.league, market: match.market || markets[Math.floor(Math.random() * markets.length)], probability: parseFloat(probability.toFixed(2)), odds: parseFloat(odds.toFixed(2)), ev: parseFloat(ev.toFixed(3)), kelly: parseFloat(kelly.toFixed(3)), confidence: parseFloat((0.6 + Math.random() * 0.35).toFixed(2)), agreement: parseFloat((0.5 + Math.random() * 0.5).toFixed(2)), kickoffTime: match.kickoffTime, oddsMovement: match.oddsMovement || movements[Math.floor(Math.random() * movements.length)], status: match.status, score: match.score, homeXG: parseFloat(homeXG.toFixed(2)), awayXG: parseFloat(awayXG.toFixed(2)) };
               });
             }
           }
@@ -653,7 +633,7 @@ export default function App() {
                 <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8 h-fit sticky top-8">
                   <div className="flex items-center justify-between mb-8">
                     <h3 className="text-xl font-bold text-white flex items-center gap-2"><Calculator className="text-green-400 w-5 h-5" />Parlay Builder</h3>
-                    {betslip.length > 1 && (<div className="flex items-center gap-2 px-3 py-1 bg-blue-600/10 border border-blue-500/20 rounded-full"><Zap size={12} className="text-blue-400" /><span className="text-[10px] font-bold text-blue-400 uppercase">Parlay EV: +4.2%</span></div>)}
+                    {betslip.length > 1 && (<div className="flex items-center gap-2 px-3 py-1 bg-blue-600/10 border border-blue-500/20 rounded-full"><Zap size={12} className="text-blue-400" /><span className="text-[10px] font-bold text-blue-400 uppercase">Parlay EV: live</span></div>)}
                     <button onClick={() => { const newBankroll = prompt("Enter Bankroll Amount:", riskSettings.bankroll.toString()); if (newBankroll) setRiskSettings({ ...riskSettings, bankroll: Number(newBankroll) }); }} className="text-[10px] font-bold text-blue-400 uppercase hover:underline">Set Bankroll</button>
                   </div>
                   <div className="space-y-4 mb-8">{betslip.length === 0 ? (<div className="text-center p-8 border-2 border-dashed border-slate-800 rounded-3xl text-slate-600 text-sm">Drag predictions here to build a parlay.</div>) : (<div className="space-y-3">{betslip.map((item) => (<div key={item.id} className="bg-slate-950 p-4 rounded-2xl border border-slate-800 flex items-center justify-between group"><div><p className="text-xs font-bold text-white">{item.match}</p><p className="text-[10px] text-slate-500">{item.market} @ {item.odds}</p></div><button onClick={() => removeFromBetslip(item.id)} className="text-slate-700 hover:text-red-400 transition-colors"><AlertCircle size={16} /></button></div>))}</div>)}</div>
