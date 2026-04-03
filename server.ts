@@ -39,7 +39,7 @@ const writeJson = (file: string, data: any) => {
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = 5000;
 
   app.use(express.json());
 
@@ -611,7 +611,7 @@ async function startServer() {
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: { middlewareMode: true, hmr: process.env.DISABLE_HMR !== 'true' },
       appType: "spa",
     });
     app.use(vite.middlewares);
@@ -623,19 +623,9 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", async () => {
+  app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
-    
-    // Initial model training
-    const csvPath = path.join(__dirname, "data", "enriched_historical.csv");
-    if (fs.existsSync(csvPath)) {
-      console.log("Running initial ML training...");
-      try {
-        await mlEngine.train(csvPath);
-      } catch (error) {
-        console.error("Initial training failed:", error);
-      }
-    }
+    console.log(`ML model will train on first prediction request.`);
   });
 }
 
