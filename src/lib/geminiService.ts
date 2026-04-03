@@ -1,5 +1,5 @@
 import { GoogleGenAI, Type, ThinkingLevel } from "@google/genai";
-import { PredictionSignal } from "./fixtureParser";
+import { PredictionSignal } from "../types";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
 
@@ -45,42 +45,53 @@ export async function askGemini(prompt: string, mode: 'thinking' | 'search' | 'g
 }
 
 export const getMatchInsights = async (signal: PredictionSignal): Promise<MatchInsights> => {
-  const prompt = `
-    Analyze the following football match prediction and provide insights:
-    Home Team: ${signal.homeTeam}
-    Away Team: ${signal.awayTeam}
-    League: ${signal.league}
-    Market: ${signal.market}
-    Probability: ${(signal.probability * 100).toFixed(1)}%
-    Odds: ${signal.odds}
-    Expected Value (EV): ${(signal.ev * 100).toFixed(1)}%
-    
-    Provide:
-    1. A catchy headline for this bet.
-    2. A brief explanation of why this is a good bet.
-    3. A risk warning.
-    4. A recommended market (can be the same or different).
-    5. A Bayesian update reasoning: Explain how the current probability (prior) might be updated given the match context (H2H, form, etc.).
-  `;
+  try {
+    const prompt = `
+        Analyze the following football match prediction and provide insights:
+        Home Team: ${signal.homeTeam}
+        Away Team: ${signal.awayTeam}
+        League: ${signal.league}
+        Market: ${signal.market}
+        Probability: ${(signal.probability * 100).toFixed(1)}%
+        Odds: ${signal.odds}
+        Expected Value (EV): ${(signal.ev * 100).toFixed(1)}%
+        
+        Provide:
+        1. A catchy headline for this bet.
+        2. A brief explanation of why this is a good bet.
+        3. A risk warning.
+        4. A recommended market (can be the same or different).
+        5. A Bayesian update reasoning: Explain how the current probability (prior) might be updated given the match context (H2H, form, etc.).
+      `;
 
-  const response = await ai.models.generateContent({
-    model: "gemini-3-flash-preview",
-    contents: prompt,
-    config: {
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          headline: { type: Type.STRING },
-          explanation: { type: Type.STRING },
-          riskWarning: { type: Type.STRING },
-          recommendedMarket: { type: Type.STRING },
-          bayesianReasoning: { type: Type.STRING },
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            headline: { type: Type.STRING },
+            explanation: { type: Type.STRING },
+            riskWarning: { type: Type.STRING },
+            recommendedMarket: { type: Type.STRING },
+            bayesianReasoning: { type: Type.STRING },
+          },
+          required: ["headline", "explanation", "riskWarning", "recommendedMarket", "bayesianReasoning"],
         },
-        required: ["headline", "explanation", "riskWarning", "recommendedMarket", "bayesianReasoning"],
       },
-    },
-  });
+    });
 
-  return JSON.parse(response.text || "{}");
+    return JSON.parse(response.text || "{}");
+  } catch (error) {
+    console.error("Failed to generate Gemini insights:", error);
+    return {
+      headline: "Insight Unavailable",
+      explanation: "Could not generate insights at this time.",
+      riskWarning: "Always bet responsibly.",
+      recommendedMarket: signal.market,
+      bayesianReasoning: "Bayesian analysis unavailable."
+    };
+  }
 };

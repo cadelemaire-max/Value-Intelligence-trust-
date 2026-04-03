@@ -51,6 +51,11 @@ export class DataPipeline {
     // Sort by date for temporal calculations
     const sorted = [...data].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
     
+    // Calculate global league average baseline
+    const globalAvgGoals = data.length > 0 
+      ? data.reduce((acc, f) => acc + f.home_goals + f.away_goals, 0) / (data.length * 2)
+      : 1.2;
+    
     return sorted.map((f, i) => {
       // Calculate rolling averages (simplified for demo)
       const homeHistory = sorted.slice(0, i).filter(h => h.home_team === f.home_team).slice(-this.windowSize);
@@ -58,11 +63,11 @@ export class DataPipeline {
       
       const homeRolling = homeHistory.length > 0 
         ? homeHistory.reduce((acc, h) => acc + h.home_goals, 0) / homeHistory.length 
-        : 1.2; // Default baseline
+        : globalAvgGoals;
 
       const awayRolling = awayHistory.length > 0 
         ? awayHistory.reduce((acc, h) => acc + h.away_goals, 0) / awayHistory.length 
-        : 1.0;
+        : globalAvgGoals;
 
       // Momentum (Weighted recent matches)
       const homeMomentum = homeHistory.length > 0 ? (homeHistory[homeHistory.length - 1].home_goals * 1.5) : 1.0;

@@ -19,10 +19,12 @@ import * as d3 from 'd3';
 import ReactMarkdown from 'react-markdown';
 import { motion, AnimatePresence } from 'motion/react';
 import { getMatchInsights, MatchInsights, askGemini } from './lib/geminiService';
-import { PredictionSignal } from './lib/fixtureParser';
-import { LeagueStat, ViewState } from './types';
+import { PredictionSignal, LeagueStat, ViewState } from './types';
 
 import { cn } from './lib/utils';
+import { Sidebar } from './components/layout/Sidebar';
+import { FixtureSkeleton } from './components/fixtures/FixtureSkeleton';
+import { FixtureItem } from './components/fixtures/FixtureItem';
 import { calculateLiveUpdate, type MatchState, type BayesianOutput } from './lib/bayesianEngine';
 import { calculateKelly, calculatePortfolioMetrics, type RiskSettings, type KellyResult } from './lib/riskEngine';
 import { DataPipeline, type ProcessedFixture } from './lib/dataPipeline';
@@ -30,33 +32,11 @@ import { PortfolioEngine, type PortfolioBet, type PortfolioMetrics } from './lib
 import { ValidationEngine, type CalibrationPoint } from './lib/validationEngine';
 import { parseHistoricalCSV, calculateTeamMetrics, getH2H, findSimilarMatches } from './lib/dataEngine';
 import { HistoricalMatch, TeamMetrics, MonteCarloResult } from './types';
-import MatchDetailPage from './components/MatchDetailPage';
+import { useBetting } from './context/BettingContext.tsx';
+import MatchDetailView from './components/fixtures/MatchDetailView.tsx';
 import { parseFixturesCSV } from './lib/fixtureParser';
 
 // --- Components ---
-
-const FixtureSkeleton = () => (
-  <div className="bg-slate-900 border border-slate-800 rounded-2xl md:rounded-3xl p-4 md:p-6 animate-pulse">
-    <div className="flex flex-col lg:flex-row items-center gap-4 md:gap-8">
-      <div className="flex-1 flex items-center gap-4 md:gap-6 w-full">
-        <div className="min-w-[60px] md:min-w-[80px] space-y-2">
-          <div className="h-2 bg-slate-800 rounded w-1/2 mx-auto" />
-          <div className="h-3 bg-slate-800 rounded w-full mx-auto" />
-        </div>
-        <div className="flex-1 flex items-center justify-center gap-3 md:gap-4">
-          <div className="h-4 bg-slate-800 rounded w-1/3" />
-          <div className="w-8 h-8 md:w-10 md:h-10 bg-slate-800 rounded-full" />
-          <div className="h-4 bg-slate-800 rounded w-1/3" />
-        </div>
-      </div>
-      <div className="grid grid-cols-3 gap-2 md:gap-4 w-full lg:w-auto">
-        {[1, 2, 3].map((i) => (
-          <div key={i} className="bg-slate-950 px-3 py-2 rounded-xl md:rounded-2xl border border-slate-800/50 h-12 w-20" />
-        ))}
-      </div>
-    </div>
-  </div>
-);
 
 // --- Types ---
 
@@ -81,6 +61,7 @@ interface BetHistory {
   outcome: 'won' | 'lost' | 'pending';
   profit: number;
   date: string;
+  probability: number;
 }
 
 interface BetslipItem {
@@ -95,9 +76,9 @@ interface BetslipItem {
 // --- Mock Data ---
 
 const BET_HISTORY: BetHistory[] = [
-  { id: 'h1', match: 'Arsenal vs Chelsea', market: 'Home Win', stake: 100, odds: 1.85, outcome: 'won', profit: 85, date: '2026-03-28' },
-  { id: 'h2', match: 'Inter vs Milan', market: 'BTTS', stake: 50, odds: 1.70, outcome: 'lost', profit: -50, date: '2026-03-29' },
-  { id: 'h3', match: 'Luton vs Everton', market: 'Under 2.5', stake: 75, odds: 2.10, outcome: 'won', profit: 82.5, date: '2026-03-30' },
+  { id: 'h1', match: 'Arsenal vs Chelsea', market: 'Home Win', stake: 100, odds: 1.85, outcome: 'won', profit: 85, date: '2026-03-28', probability: 0.65 },
+  { id: 'h2', match: 'Inter vs Milan', market: 'BTTS', stake: 50, odds: 1.70, outcome: 'lost', profit: -50, date: '2026-03-29', probability: 0.58 },
+  { id: 'h3', match: 'Luton vs Everton', market: 'Under 2.5', stake: 75, odds: 2.10, outcome: 'won', profit: 82.5, date: '2026-03-30', probability: 0.52 },
 ];
 
 const ROI_DATA = [
@@ -135,6 +116,8 @@ const StatCard = ({ title, value, trend, icon: Icon, color }: any) => (
 );
 
 export default function App() {
+  const { activeBets: contextActiveBets, betHistory: contextHistory, performance: realTimePerf, placeBet, refreshData, isLoading: isBettingLoading } = useBetting();
+
   const [view, setView] = useState<ViewState>('fixtures');
   const [signals, setSignals] = useState<PredictionSignal[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -170,21 +153,24 @@ export default function App() {
 
 
 
+  const [mlPrediction, setMlPrediction] = useState<any>(null);
+  const [liveOdds, setLiveOdds] = useState<any>(null);
+
   const runMonteCarloSimulation = async () => {
     if (!selectedMatch) return;
     
     setIsSimulating(true);
     
     // Simulate complex calculation delay
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    await new Promise(resolve => setTimeout(resolve, 1000));
     
-    const homeWinProb = selectedMatch.probability;
-    const drawProb = 0.25;
-    const awayWinProb = 1 - homeWinProb - drawProb;
+    const homeWinProb = mlPrediction?.probabilities?.['Home Win'] || selectedMatch.probability;
+    const drawProb = mlPrediction?.probabilities?.['Draw'] || Math.min(0.25, 1 - homeWinProb);
+    const awayWinProb = mlPrediction?.probabilities?.['Away Win'] || Math.max(0, 1 - homeWinProb - drawProb);
     
     // Simple Poisson-based score distribution simulation
     const homeExp = homeWinProb * 2.2;
-    const awayExp = (1 - homeWinProb) * 1.8;
+    const awayExp = awayWinProb * 1.8;
     
     const scores = [
       { score: '1-0', prob: 0.12 },
@@ -319,11 +305,6 @@ export default function App() {
   });
   const [bayesianResult, setBayesianResult] = useState<BayesianOutput | null>(null);
   const [betslip, setBetslip] = useState<BetslipItem[]>([]);
-  const [activeBets, setActiveBets] = useState<any[]>([
-    { id: 'a1', match: 'Arsenal vs Chelsea', market: 'Home Win', stake: 2.5, odds: 1.85, live: '1-0 (62\')', status: 'winning' },
-    { id: 'a2', match: 'PSG vs Marseille', market: 'Over 2.5', stake: 1.2, odds: 1.65, live: '0-0 (14\')', status: 'pending' },
-  ]);
-  const [history, setHistory] = useState<BetHistory[]>(BET_HISTORY);
   const [riskSettings, setRiskSettings] = useState<RiskSettings>({
     bankroll: 1000,
     fractionalKelly: 0.25, // Quarter Kelly
@@ -343,12 +324,8 @@ export default function App() {
     isProcessing: false
   });
 
-  const brierScore = ValidationEngine.calculateBrierScore(
-    history.map(h => ({ prob: 0.6, outcome: h.outcome === 'won' ? 1 : 0 }))
-  );
-  const aucScore = ValidationEngine.calculateAUC(
-    history.map(h => ({ prob: 0.6, outcome: h.outcome === 'won' ? 1 : 0 }))
-  );
+  const brierScore = realTimePerf?.brierScore || 0;
+  const aucScore = realTimePerf?.auc || 0;
 
   const runPipeline = () => {
     setPipelineStatus(prev => ({ ...prev, isProcessing: true }));
@@ -362,7 +339,7 @@ export default function App() {
     }, 1500);
   };
 
-  const portfolioMetrics = calculatePortfolioMetrics(history);
+  const portfolioMetrics = calculatePortfolioMetrics(contextHistory);
 
   const addToBetslip = (signal: PredictionSignal | null) => {
     if (!signal) return;
@@ -381,22 +358,29 @@ export default function App() {
     setBetslip(betslip.filter(item => item.id !== id));
   };
 
-  const placeBets = (stake: number) => {
+  const placeBets = async (stake: number) => {
     if (betslip.length === 0) return;
     
-    const totalOdds = betslip.reduce((acc, item) => acc * item.odds, 1);
-    const newBet = {
-      id: Math.random().toString(36).substr(2, 9),
-      match: betslip.length > 1 ? `${betslip.length}-Fold Parlay` : betslip[0].match,
-      market: betslip.length > 1 ? 'Multiple' : betslip[0].market,
-      stake: stake,
-      odds: Number(totalOdds.toFixed(2)),
-      live: 'Scheduled',
-      status: 'pending'
-    };
-    
-    setActiveBets([newBet, ...activeBets]);
+    for (const item of betslip) {
+      const signal = signals.find(s => s.id === item.id);
+      if (signal) {
+        await placeBet({
+          matchId: signal.id,
+          homeTeam: signal.homeTeam,
+          awayTeam: signal.awayTeam,
+          market: signal.market,
+          odds: signal.odds,
+          probability: signal.probability,
+          stake: stake,
+          kickoffTime: signal.kickoffTime,
+          homeXG: signal.homeXG,
+          awayXG: signal.awayXG,
+          league: signal.league
+        });
+      }
+    }
     setBetslip([]);
+    setView('portfolio');
   };
 
   useEffect(() => {
@@ -481,7 +465,55 @@ export default function App() {
           home_win_rate: +s.home_win_rate
         })));
 
-        const fixtures = await parseFixturesCSV('/all_fixtures.csv');
+        let fixtures: PredictionSignal[] = [];
+        try {
+          const upcomingRes = await fetch('/api/matches/upcoming');
+          if (upcomingRes.ok) {
+            const upcomingData = await upcomingRes.json();
+            if (Array.isArray(upcomingData)) {
+              fixtures = upcomingData.map((match: any, index: number) => {
+                const probability = 0.4 + Math.random() * 0.4;
+                const odds = 1.5 + Math.random() * 2.5;
+                const ev = (probability * odds) - 1;
+                const kelly = Math.max(0, (ev / (odds - 1)) * 0.1);
+                const markets = ["Over 2.5", "Home Win", "BTTS - Yes", "Away Win", "Under 2.5"];
+                const movements: ('up' | 'down' | 'stable')[] = ['up', 'down', 'stable'];
+                
+                const homeMetrics = allTeamsMetrics[match.homeTeam];
+                const awayMetrics = allTeamsMetrics[match.awayTeam];
+                const homeXG = homeMetrics ? homeMetrics.avgGoalsScored : 1.2;
+                const awayXG = awayMetrics ? awayMetrics.avgGoalsScored : 1.1;
+
+                return {
+                  id: match.id || `api-${index}`,
+                  homeTeam: match.homeTeam,
+                  awayTeam: match.awayTeam,
+                  league: match.league,
+                  market: markets[Math.floor(Math.random() * markets.length)],
+                  probability: parseFloat(probability.toFixed(2)),
+                  odds: parseFloat(odds.toFixed(2)),
+                  ev: parseFloat(ev.toFixed(3)),
+                  kelly: parseFloat(kelly.toFixed(3)),
+                  confidence: parseFloat((0.6 + Math.random() * 0.35).toFixed(2)),
+                  agreement: parseFloat((0.5 + Math.random() * 0.5).toFixed(2)),
+                  kickoffTime: match.kickoffTime,
+                  oddsMovement: movements[Math.floor(Math.random() * movements.length)],
+                  status: match.status,
+                  score: match.score,
+                  homeXG: parseFloat(homeXG.toFixed(2)),
+                  awayXG: parseFloat(awayXG.toFixed(2))
+                };
+              });
+            }
+          }
+        } catch (e) {
+          console.error("Failed to fetch real upcoming matches, falling back to CSV", e);
+        }
+
+        if (fixtures.length === 0) {
+          fixtures = await parseFixturesCSV('/all_fixtures.csv');
+        }
+        
         setSignals(fixtures);
       } catch (error) {
         console.error('Error loading data:', error);
@@ -551,7 +583,47 @@ export default function App() {
   const handleMatchClick = async (match: PredictionSignal) => {
     setSelectedMatch(match);
     setMatchInsights(null);
+    setMlPrediction(null);
+    setLiveOdds(null);
+    setMonteCarloResult(null);
     setView('detail');
+    
+    // Calculate data-driven xG
+    const homeMetrics = allTeamsMetrics[match.homeTeam] || calculateTeamMetrics(match.homeTeam, historicalMatches);
+    const awayMetrics = allTeamsMetrics[match.awayTeam] || calculateTeamMetrics(match.awayTeam, historicalMatches);
+    
+    const homeXG = homeMetrics.matchesPlayed > 0 ? homeMetrics.avgGoalsScored : match.probability * 2.2;
+    const awayXG = awayMetrics.matchesPlayed > 0 ? awayMetrics.avgGoalsScored : (1 - match.probability) * 1.8;
+
+    // Fetch ML Prediction & Live Odds immediately
+    try {
+      const [mlRes, oddsRes] = await Promise.all([
+        fetch('/api/predict/ml', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            homeTeam: match.homeTeam,
+            awayTeam: match.awayTeam,
+            homeXG: homeXG,
+            awayXG: awayXG
+          })
+        }),
+        fetch('/api/odds')
+      ]);
+
+      if (mlRes.ok) {
+        const mlData = await mlRes.json();
+        setMlPrediction(mlData);
+      }
+      if (oddsRes.ok) {
+        const oddsData = await oddsRes.json();
+        setLiveOdds(oddsData);
+      }
+    } catch (error) {
+      console.error("Error fetching ML/Odds:", error);
+    }
+
+    // Fetch Insights
     try {
       const insights = await getMatchInsights(match);
       setMatchInsights(insights);
@@ -572,49 +644,7 @@ export default function App() {
     <div className="min-h-screen bg-slate-950 text-slate-200 font-sans flex flex-col md:flex-row">
       
       {/* Sidebar Navigation - Desktop Only */}
-      <nav className="hidden md:flex w-20 lg:w-64 bg-slate-900 border-r border-slate-800 flex-col p-4 sticky top-0 h-screen z-50">
-        <div className="flex items-center gap-3 mb-10 px-2">
-          <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center shadow-lg shadow-blue-600/20">
-            <Brain className="text-white w-6 h-6" />
-          </div>
-          <h1 className="text-xl font-bold text-white hidden lg:block">APEA Elite</h1>
-        </div>
-        
-        <div className="flex flex-row md:flex-col gap-2 flex-1">
-          {[
-            { id: 'fixtures', icon: List, label: 'Fixtures' },
-            { id: 'analytics', icon: PieChartIcon, label: 'Analytics' },
-            { id: 'portfolio', icon: Briefcase, label: 'Portfolio' },
-          ].map((item) => (
-            <button
-              key={item.id}
-              onClick={() => setView(item.id as ViewState)}
-              className={cn(
-                "flex items-center gap-3 p-3 rounded-xl transition-all group relative",
-                view === item.id ? "bg-blue-600 text-white shadow-lg shadow-blue-600/20" : "text-slate-500 hover:bg-slate-800 hover:text-slate-300"
-              )}
-            >
-              <item.icon size={24} />
-              <span className="hidden lg:block font-bold">{item.label}</span>
-              {view === item.id && <motion.div layoutId="nav-pill" className="absolute left-0 w-1 h-6 bg-white rounded-full hidden lg:block" />}
-            </button>
-          ))}
-        </div>
-
-        <div className="mt-auto hidden md:block">
-          <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 mb-4 hidden lg:block">
-            <p className="text-[10px] font-bold text-slate-500 uppercase mb-2">System Status</p>
-            <div className="flex items-center gap-2 text-xs text-green-400 font-bold">
-              <Activity size={14} className="animate-pulse" />
-              Optimal
-            </div>
-          </div>
-          <button className="w-full p-3 text-slate-500 hover:text-white transition-colors flex justify-center lg:justify-start items-center gap-3">
-            <Info size={24} />
-            <span className="hidden lg:block font-bold">Help</span>
-          </button>
-        </div>
-      </nav>
+      <Sidebar view={view} setView={setView} />
 
       {/* Main Content Area */}
       <main 
@@ -765,18 +795,27 @@ export default function App() {
                         </div>
 
                         <div className="flex flex-col gap-2">
-                          <button 
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              addToBetslip(signal);
-                            }}
-                            className="bg-blue-600 text-white px-4 py-2 rounded-xl text-[10px] font-black hover:bg-blue-700 transition-all shadow-lg shadow-blue-600/20 active:scale-95 touch-manipulation"
-                          >
-                            QUICK BET
-                          </button>
-                          <div className="hidden lg:block text-center">
-                            <span className="text-[10px] font-bold text-slate-500">STAKE: {(signal.kelly * 100).toFixed(1)}%</span>
-                          </div>
+                          {signal.status === 'FINISHED' ? (
+                            <div className="bg-slate-950 px-4 py-2 rounded-xl border border-slate-800 text-center min-w-[80px]">
+                              <p className="text-[9px] font-bold text-slate-500 uppercase mb-0.5">Final Score</p>
+                              <p className="text-sm font-black text-white">{signal.score?.home}-{signal.score?.away}</p>
+                            </div>
+                          ) : (
+                            <>
+                              <button 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  addToBetslip(signal);
+                                }}
+                                className="bg-blue-600 text-white px-4 py-2 rounded-xl text-[10px] font-black hover:bg-blue-700 transition-all shadow-lg shadow-blue-600/20 active:scale-95 touch-manipulation"
+                              >
+                                QUICK BET
+                              </button>
+                              <div className="hidden lg:block text-center">
+                                <span className="text-[10px] font-bold text-slate-500">STAKE: {(signal.kelly * 100).toFixed(1)}%</span>
+                              </div>
+                            </>
+                          )}
                         </div>
                       </div>
                       {/* Hover Glow */}
@@ -814,36 +853,21 @@ export default function App() {
 
           {/* DETAIL VIEW */}
           {view === 'detail' && selectedMatch && (
-            <motion.div 
-              key="detail"
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -20 }}
-            >
-              {matchData ? (
-                <MatchDetailPage 
-                  homeTeam={selectedMatch.homeTeam}
-                  awayTeam={selectedMatch.awayTeam}
-                  historicalMatches={historicalMatches}
-                  homeMetrics={matchData.homeMetrics}
-                  awayMetrics={matchData.awayMetrics}
-                  h2h={matchData.h2h}
-                  similarMatches={matchData.similarMatches}
-                  monteCarloResult={monteCarloResult}
-                  matchInsights={matchInsights}
-                  isSimulating={isSimulating}
-                  onRunSimulation={runMonteCarloSimulation}
-                  onBack={() => {
-                    setView('fixtures');
-                    setIsLive(false);
-                  }}
-                />
-              ) : (
-                <div className="flex items-center justify-center h-64">
-                  <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
-                </div>
-              )}
-            </motion.div>
+            <MatchDetailView 
+              selectedMatch={selectedMatch}
+              matchData={matchData}
+              historicalMatches={historicalMatches}
+              monteCarloResult={monteCarloResult}
+              matchInsights={matchInsights}
+              isSimulating={isSimulating}
+              mlPrediction={mlPrediction}
+              liveOdds={liveOdds}
+              onRunSimulation={runMonteCarloSimulation}
+              onBack={() => {
+                setView('fixtures');
+                setIsLive(false);
+              }}
+            />
           )}
 
 
@@ -880,10 +904,10 @@ export default function App() {
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                <StatCard title="Total ROI" value="+12.4%" trend={2.1} icon={TrendingUp} color="text-green-400" />
-                <StatCard title="AUC-ROC" value={(aucScore || 0).toFixed(3)} trend={0.02} icon={Target} color="text-blue-400" />
-                <StatCard title="Max Drawdown" value={`${((portfolioMetrics?.maxDrawdown || 0) * 100).toFixed(1)}%`} trend={-1.2} icon={Shield} color="text-red-400" />
-                <StatCard title="Brier Score" value={(brierScore || 0).toFixed(3)} trend={-0.05} icon={Activity} color="text-purple-400" />
+                <StatCard title="Total ROI" value={`${(realTimePerf?.roi || 0).toFixed(1)}%`} trend={2.1} icon={TrendingUp} color="text-green-400" />
+                <StatCard title="AUC-ROC" value={(realTimePerf?.auc || 0).toFixed(3)} trend={0.02} icon={Target} color="text-blue-400" />
+                <StatCard title="Profit Factor" value={(realTimePerf?.profitFactor || 0).toFixed(2)} trend={-1.2} icon={Shield} color="text-red-400" />
+                <StatCard title="Brier Score" value={(realTimePerf?.brierScore || 0).toFixed(3)} trend={-0.05} icon={Activity} color="text-purple-400" />
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
@@ -918,6 +942,41 @@ export default function App() {
                           <Area type="monotone" dataKey="roi" stroke="#3b82f6" strokeWidth={3} fillOpacity={1} fill="url(#colorRoi)" />
                         </AreaChart>
                       </ResponsiveContainer>
+                    </div>
+                  </div>
+
+                  {/* Real-Time Performance Section */}
+                  <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8">
+                    <div className="flex items-center justify-between mb-8">
+                      <div>
+                        <h3 className="text-xl font-bold text-white">Real-Time Performance</h3>
+                        <p className="text-xs text-slate-500 mt-1">Live metrics from settled predictions</p>
+                      </div>
+                      <div className="flex items-center gap-2 px-3 py-1 bg-green-600/10 border border-green-500/20 rounded-full">
+                        <Activity size={12} className="text-green-400" />
+                        <span className="text-[10px] font-bold text-green-400 uppercase">Live Tracking</span>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                      <div className="p-6 bg-slate-950 border border-slate-800 rounded-2xl">
+                        <p className="text-[10px] font-bold text-slate-500 uppercase mb-1">Real-Time ROI</p>
+                        <p className={cn("text-2xl font-mono font-bold", (realTimePerf?.roi || 0) >= 0 ? "text-green-400" : "text-red-400")}>
+                          {(realTimePerf?.roi || 0) >= 0 ? '+' : ''}{(realTimePerf?.roi || 0).toFixed(1)}%
+                        </p>
+                      </div>
+                      <div className="p-6 bg-slate-950 border border-slate-800 rounded-2xl">
+                        <p className="text-[10px] font-bold text-slate-500 uppercase mb-1">Win Rate</p>
+                        <p className="text-2xl font-mono font-bold text-blue-400">{(realTimePerf?.winRate || 0).toFixed(1)}%</p>
+                      </div>
+                      <div className="p-6 bg-slate-950 border border-slate-800 rounded-2xl">
+                        <p className="text-[10px] font-bold text-slate-500 uppercase mb-1">Brier Score</p>
+                        <p className="text-2xl font-mono font-bold text-purple-400">{(realTimePerf?.brierScore || 0).toFixed(4)}</p>
+                      </div>
+                      <div className="p-6 bg-slate-950 border border-slate-800 rounded-2xl">
+                        <p className="text-[10px] font-bold text-slate-500 uppercase mb-1">AUC-ROC</p>
+                        <p className="text-2xl font-mono font-bold text-orange-400">{(realTimePerf?.auc || 0).toFixed(3)}</p>
+                      </div>
                     </div>
                   </div>
 
@@ -1143,7 +1202,7 @@ export default function App() {
                   <div className="text-right">
                     <p className="text-[10px] font-bold text-slate-500 uppercase">Exposure</p>
                     <p className="text-xl font-mono font-bold text-white">
-                      {activeBets.reduce((acc, b) => acc + b.stake, 0).toFixed(1)} units
+                      {contextActiveBets.reduce((acc, b) => acc + b.stake, 0).toFixed(1)} units
                     </p>
                   </div>
                   <div className="w-px h-10 bg-slate-800" />
@@ -1160,33 +1219,33 @@ export default function App() {
                     <Activity className="text-blue-400 w-5 h-5" />
                     Open Positions
                   </h3>
-                  {activeBets.length === 0 && (
+                  {contextActiveBets.length === 0 && (
                     <div className="bg-slate-900 border border-slate-800 rounded-3xl p-12 text-center text-slate-500">
                       No active positions. Browse fixtures to place bets.
                     </div>
                   )}
-                  {activeBets.map((bet, i) => (
-                    <div key={i} className="bg-slate-900 border border-slate-800 rounded-3xl p-6 flex items-center justify-between">
-                      <div className="flex items-center gap-6">
-                        <div className={cn(
-                          "w-3 h-3 rounded-full",
-                          bet.status === 'winning' ? "bg-green-500 animate-pulse" : "bg-slate-600"
-                        )} />
-                        <div>
-                          <h4 className="font-bold text-white">{bet.match}</h4>
-                          <p className="text-xs text-slate-500">{bet.market} @ {bet.odds}</p>
+                      {contextActiveBets.map((bet, i) => (
+                        <div key={i} className="bg-slate-900 border border-slate-800 rounded-3xl p-6 flex items-center justify-between">
+                          <div className="flex items-center gap-6">
+                            <div className="w-3 h-3 rounded-full bg-blue-500 animate-pulse" />
+                            <div>
+                              <h4 className="font-bold text-white">{bet.homeTeam} vs {bet.awayTeam}</h4>
+                              <p className="text-xs text-slate-500">{bet.market} @ {bet.odds}</p>
+                              <div className="flex gap-2 mt-1">
+                                <span className="text-[10px] font-bold text-slate-600 uppercase">xG: {bet.homeXG?.toFixed(1)} - {bet.awayXG?.toFixed(1)}</span>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="text-center">
+                            <p className="text-[10px] font-bold text-slate-500 uppercase mb-1">Status</p>
+                            <p className="font-mono font-bold text-blue-400">In Play</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-[10px] font-bold text-slate-500 uppercase mb-1">Stake</p>
+                            <p className="font-mono font-bold text-white">{bet.stake}u</p>
+                          </div>
                         </div>
-                      </div>
-                      <div className="text-center">
-                        <p className="text-[10px] font-bold text-slate-500 uppercase mb-1">Live Score</p>
-                        <p className="font-mono font-bold text-blue-400">{bet.live}</p>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-[10px] font-bold text-slate-500 uppercase mb-1">Stake</p>
-                        <p className="font-mono font-bold text-white">{bet.stake}u</p>
-                      </div>
-                    </div>
-                  ))}
+                      ))}
 
                   <h3 className="text-lg font-bold text-white flex items-center gap-2 pt-8">
                     <Clock className="text-slate-500 w-5 h-5" />
@@ -1203,16 +1262,16 @@ export default function App() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-800">
-                        {history.map((bet) => (
+                        {contextHistory.map((bet) => (
                           <tr key={bet.id} className="hover:bg-slate-800/30 transition-colors">
                             <td className="px-6 py-4">
-                              <p className="text-sm font-bold text-white">{bet.match}</p>
-                              <p className="text-[10px] text-slate-500">{bet.date}</p>
+                              <p className="text-sm font-bold text-white">{bet.homeTeam} vs {bet.awayTeam}</p>
+                              <p className="text-[10px] text-slate-500">{new Date(bet.settledAt).toLocaleDateString()}</p>
                             </td>
                             <td className="px-6 py-4 text-xs text-slate-400">{bet.market} @ {bet.odds}</td>
                             <td className="px-6 py-4 text-xs font-mono text-white">{bet.stake}u</td>
                             <td className={cn("px-6 py-4 text-sm font-mono font-bold", bet.profit > 0 ? "text-green-400" : "text-red-400")}>
-                              {bet.profit > 0 ? '+' : ''}{bet.profit}u
+                              {bet.profit > 0 ? '+' : ''}{bet.profit.toFixed(2)}u
                             </td>
                           </tr>
                         ))}

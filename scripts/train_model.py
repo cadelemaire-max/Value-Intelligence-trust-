@@ -5,7 +5,7 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import OneHotEncoder
 from sklearn.pipeline import Pipeline
-import joblib
+import pickle
 import os
 
 def train_and_save_model():
@@ -51,8 +51,9 @@ def train_and_save_model():
 
     # 8. Save
     os.makedirs('models', exist_ok=True)
-    joblib.dump(model, 'models/football_model.joblib')
-    print("💾 Model saved to models/football_model.joblib")
+    with open('models/football_model.pkl', 'wb') as f:
+        pickle.dump(model, f)
+    print("💾 Model saved to models/football_model.pkl")
 
 if __name__ == "__main__":
     train_and_save_model()

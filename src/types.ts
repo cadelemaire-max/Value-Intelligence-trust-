@@ -67,4 +67,39 @@ export interface LeagueStat {
   strengthRating: number;
 }
 
+export interface PredictionSignal {
+  id: string;
+  homeTeam: string;
+  awayTeam: string;
+  league: string;
+  market: string;
+  probability: number;
+  odds: number;
+  ev: number;
+  kelly: number;
+  confidence: number;
+  agreement: number;
+  kickoffTime: string;
+  oddsMovement: 'up' | 'down' | 'stable';
+  status?: string;
+  score?: {
+    home: number | null;
+    away: number | null;
+  };
+  homeXG?: number;
+  awayXG?: number;
+}
+
+export interface PortfolioMetrics {
+  totalExpectedReturn: number;
+  portfolioVariance: number;
+  diversificationScore: number;
+}
+
+export interface CalibrationPoint {
+  bin: number;
+  actualRate: number;
+  predictedProb: number;
+}
+
 export type ViewState = 'fixtures' | 'detail' | 'analytics' | 'portfolio';

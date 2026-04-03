@@ -21,6 +21,15 @@ export interface KellyResult {
 }
 
 /**
+ * EV Shrinkage for small sample sizes or extreme outliers.
+ * Pulls the estimated edge toward a baseline to prevent over-leverage.
+ */
+export function applyEVShrinkage(edge: number, sampleSize: number = 10): number {
+  const shrinkageFactor = sampleSize / (sampleSize + 5); // Simple Bayesian shrinkage
+  return edge * shrinkageFactor;
+}
+
+/**
  * Advanced Kelly Criterion Calculation
  * f* = (bp - q) / b
  * where b = odds - 1, p = win_prob, q = 1 - p
@@ -29,7 +38,8 @@ export function calculateKelly(
   winProb: number,
   odds: number,
   settings: RiskSettings,
-  modelAgreement: number = 1.0
+  modelAgreement: number = 1.0,
+  sampleSize: number = 10
 ): KellyResult {
   const b = odds - 1;
   const p = winProb;
@@ -38,8 +48,9 @@ export function calculateKelly(
   // 1. Raw Kelly
   const rawKelly = (b * p - q) / b;
   
-  // 2. Edge Calculation
-  const edge = (p * odds) - 1;
+  // 2. Edge Calculation with Shrinkage
+  let edge = (p * odds) - 1;
+  edge = applyEVShrinkage(edge, sampleSize);
   
   // 3. Validation Logic
   let isRecommended = true;

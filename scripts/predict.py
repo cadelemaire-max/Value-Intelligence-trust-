@@ -1,11 +1,11 @@
 import sys
 import json
-import joblib
+import pickle
 import pandas as pd
 import os
 
 def predict(home_team, away_team, home_xG, away_xG):
-    model_path = 'models/football_model.joblib'
+    model_path = 'models/football_model.pkl'
     
     if not os.path.exists(model_path):
         print(json.dumps({"error": f"Model not found at {model_path}. Please train and upload the model first."}))
@@ -13,7 +13,8 @@ def predict(home_team, away_team, home_xG, away_xG):
         
     try:
         # Load the trained pipeline
-        model = joblib.load(model_path)
+        with open(model_path, 'rb') as f:
+            model = pickle.load(f)
         
         # Create a DataFrame for the input
         input_data = pd.DataFrame({
@@ -42,7 +43,8 @@ def predict(home_team, away_team, home_xG, away_xG):
         output = {
             "prediction": result_map.get(prediction, "Unknown"),
             "prediction_code": int(prediction),
-            "probabilities": prob_dict
+            "probabilities": prob_dict,
+            "probability": prob_dict.get(result_map.get(prediction, "Unknown"), 0.0)
         }
         
         print(json.dumps(output))

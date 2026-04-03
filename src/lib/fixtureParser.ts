@@ -1,20 +1,5 @@
 import Papa from 'papaparse';
-
-export interface PredictionSignal {
-  id: string;
-  homeTeam: string;
-  awayTeam: string;
-  league: string;
-  market: string;
-  probability: number;
-  odds: number;
-  ev: number;
-  kelly: number;
-  confidence: number;
-  agreement: number;
-  kickoffTime: string;
-  oddsMovement: 'up' | 'down' | 'stable';
-}
+import { PredictionSignal } from '../types';
 
 export const parseFixturesCSV = async (csvUrl: string): Promise<PredictionSignal[]> => {
   return new Promise((resolve, reject) => {
