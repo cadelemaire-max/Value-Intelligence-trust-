@@ -457,7 +457,8 @@ export default function App() {
 
   const filteredSignals = useMemo(() => {
     const filtered = signals.filter(s => {
-      const matchesLeague = activeLeague === 'All' || (leagueMapping[activeLeague] || [activeLeague.toLowerCase()]).some(l => s.league.toLowerCase().includes(l));
+      const normalizedLeague = s.league.toLowerCase().replace(/\s+/g, '-');
+      const matchesLeague = activeLeague === 'All' || (leagueMapping[activeLeague] || [activeLeague.toLowerCase()]).some(l => normalizedLeague.includes(l));
       const matchesSearch = s.homeTeam.toLowerCase().includes(searchTerm.toLowerCase()) || s.awayTeam.toLowerCase().includes(searchTerm.toLowerCase()) || s.league.toLowerCase().includes(searchTerm.toLowerCase());
       const matchesMarket = selectedMarkets.length === 0 || selectedMarkets.includes(s.market);
       return matchesLeague && matchesSearch && matchesMarket;
@@ -515,7 +516,7 @@ export default function App() {
       console.error("Error fetching ML/Odds:", error);
     }
     try {
-      const insights = await getMatchInsights(match.homeTeam, match.awayTeam, match.probability, match.market);
+      const insights = await getMatchInsights(match);
       setMatchInsights(insights);
     } catch (error) {
       console.error('Error fetching match insights:', error);
