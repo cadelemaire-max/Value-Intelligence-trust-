@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { HistoricalMatch, TeamMetrics, H2HSummary, ComparisonMetrics, MonteCarloResult, MatchInsights } from '../types';
 import { cn } from '../lib/utils';
+import { calculateKelly } from '../lib/riskEngine';
 
 interface MatchDetailPageProps {
   homeTeam: string;
@@ -71,14 +72,32 @@ const MatchDetailPage: React.FC<MatchDetailPageProps> = ({
   }, [liveOdds, homeTeam, awayTeam, mlPrediction]);
 
   const probability = mlPrediction?.probability ? (mlPrediction.probability * 100).toFixed(1) + '%' : '--';
+  const kellyStake = useMemo(() => {
+    if (!mlPrediction?.probability || bestOdds === '--') return null;
+    const result = calculateKelly(
+      Number(mlPrediction.probability),
+      Number(bestOdds),
+      {
+        bankroll: 1000,
+        fractionalKelly: 0.25,
+        maxBetPercentage: 0.05,
+        minEdgeThreshold: 0.02,
+        minConfidenceFloor: 0.65
+      },
+      0.75,
+      10
+    );
+    return result;
+  }, [mlPrediction, bestOdds]);
   
-  // Calculate a fake EV for demo purposes if we have odds and probability
+  // Shrunk EV to avoid unrealistic spikes in small samples
   const ev = useMemo(() => {
     if (bestOdds === '--' || probability === '--') return '--';
     const prob = parseFloat(probability) / 100;
     const odds = parseFloat(bestOdds);
-    const expectedValue = (prob * odds) - 1;
-    return (expectedValue * 100).toFixed(1) + '%';
+    const rawEV = (prob * odds) - 1;
+    const shrunkEV = Math.max(-0.1, Math.min(0.25, rawEV * 0.6));
+    return (shrunkEV * 100).toFixed(1) + '%';
   }, [bestOdds, probability]);
 
   return (
@@ -143,6 +162,10 @@ const MatchDetailPage: React.FC<MatchDetailPageProps> = ({
               <Info size={14} /> Why?
             </button>
           </div>
+        </div>
+        <div className="mt-4 flex items-center justify-between text-xs text-slate-400">
+          <span>Kelly</span>
+          <span className="font-bold text-white">{kellyStake ? `${(kellyStake.fraction * 100).toFixed(1)}%` : '--'}</span>
         </div>
         
         {showGemini && (
