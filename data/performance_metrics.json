@@ -1,0 +1,13 @@
+{
+  "totalBets": 0,
+  "settledBets": 0,
+  "wins": 0,
+  "losses": 0,
+  "roi": 0,
+  "brierScore": 0,
+  "auc": 0.5,
+  "profitFactor": 0,
+  "accuracy": 0,
+  "missRate": 0,
+  "lastUpdated": "2026-04-03T21:33:47.624Z"
+}

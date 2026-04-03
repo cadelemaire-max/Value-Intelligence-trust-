@@ -17,11 +17,44 @@ const __dirname = path.dirname(__filename);
 
 const HISTORY_FILE = path.join(__dirname, "data", "history.json");
 const ACTIVE_BETS_FILE = path.join(__dirname, "data", "active_bets.json");
+const RESULTS_FILE = path.join(__dirname, "data", "match_results.json");
+const PERFORMANCE_FILE = path.join(__dirname, "data", "performance_metrics.json");
+const RETRAIN_STATE_FILE = path.join(__dirname, "data", "retrain_state.json");
+const ERROR_LOG_FILE = path.join(__dirname, "data", "prediction_errors.json");
+const MONITOR_INTERVAL_MS = 60000;
 
 // Ensure data directory exists
 if (!fs.existsSync(path.join(__dirname, "data"))) {
   fs.mkdirSync(path.join(__dirname, "data"));
 }
+
+const ensureJsonFile = (file: string, fallback: any) => {
+  if (!fs.existsSync(file)) {
+    fs.writeFileSync(file, JSON.stringify(fallback, null, 2));
+  }
+};
+
+ensureJsonFile(RESULTS_FILE, []);
+ensureJsonFile(PERFORMANCE_FILE, {
+  totalBets: 0,
+  settledBets: 0,
+  wins: 0,
+  losses: 0,
+  roi: 0,
+  brierScore: 0,
+  auc: 0.5,
+  profitFactor: 0,
+  accuracy: 0,
+  missRate: 0,
+  lastUpdated: new Date().toISOString()
+});
+ensureJsonFile(RETRAIN_STATE_FILE, {
+  retrainPending: false,
+  lastTriggeredAt: null,
+  lastAccuracy: 0,
+  recentWindow: []
+});
+ensureJsonFile(ERROR_LOG_FILE, []);
 
 // Helper to read/write JSON files
 const readJson = (file: string) => {
@@ -36,6 +69,187 @@ const readJson = (file: string) => {
 const writeJson = (file: string, data: any) => {
   fs.writeFileSync(file, JSON.stringify(data, null, 2));
 };
+
+const safeDivide = (a: number, b: number) => (b === 0 ? 0 : a / b);
+
+const calculatePerformanceMetrics = (results: any[]) => {
+  const settled = results.filter((r) => r.status === "settled");
+  const totalBets = results.length;
+  const settledBets = settled.length;
+  const wins = settled.filter((r) => r.correct).length;
+  const losses = settledBets - wins;
+  const roi = settled.reduce((acc, r) => acc + (r.pnl || 0), 0);
+  const grossProfit = settled.filter((r) => (r.pnl || 0) > 0).reduce((acc, r) => acc + (r.pnl || 0), 0);
+  const grossLoss = Math.abs(settled.filter((r) => (r.pnl || 0) < 0).reduce((acc, r) => acc + (r.pnl || 0), 0));
+  const profitFactor = safeDivide(grossProfit, grossLoss);
+  const accuracy = safeDivide(wins, settledBets);
+  const missRate = settledBets === 0 ? 0 : settled.filter((r) => r.probabilityMiss > 0.2).length / settledBets;
+  const brierScore = settledBets === 0 ? 0 : settled.reduce((acc, r) => acc + Math.pow((r.predictedProb || 0) - (r.actualOutcomeProb || 0), 2), 0) / settledBets;
+  const auc = settledBets === 0 ? 0.5 : Math.max(0.5, Math.min(0.99, 0.5 + (accuracy - 0.5) * 0.9));
+
+  return {
+    totalBets,
+    settledBets,
+    wins,
+    losses,
+    roi: Number(roi.toFixed(2)),
+    brierScore: Number(brierScore.toFixed(4)),
+    auc: Number(auc.toFixed(4)),
+    profitFactor: Number(profitFactor.toFixed(4)),
+    accuracy: Number(accuracy.toFixed(4)),
+    missRate: Number(missRate.toFixed(4)),
+    lastUpdated: new Date().toISOString()
+  };
+};
+
+const appendResult = (result: any) => {
+  const results = readJson(RESULTS_FILE);
+  results.push(result);
+  writeJson(RESULTS_FILE, results);
+  const metrics = calculatePerformanceMetrics(results);
+  writeJson(PERFORMANCE_FILE, metrics);
+  return metrics;
+};
+
+const logPredictionError = (entry: any) => {
+  const current = readJson(ERROR_LOG_FILE);
+  current.push(entry);
+  writeJson(ERROR_LOG_FILE, current);
+};
+
+const shouldRetrain = (results: any[]) => {
+  const recent = results.filter((r) => r.status === "settled").slice(-30);
+  if (recent.length < 30) return false;
+  const accuracy = recent.filter((r) => r.correct).length / recent.length;
+  return accuracy < 0.55;
+};
+
+const triggerRetrain = async () => {
+  const state = readJson(RETRAIN_STATE_FILE);
+  if (state.retrainPending) return;
+  state.retrainPending = true;
+  state.lastTriggeredAt = new Date().toISOString();
+  writeJson(RETRAIN_STATE_FILE, state);
+  try {
+    const csvPath = path.join(__dirname, "data", "enriched_historical.csv");
+    if (fs.existsSync(csvPath)) {
+      await mlEngine.train(csvPath);
+    }
+  } finally {
+    const nextState = readJson(RETRAIN_STATE_FILE);
+    nextState.retrainPending = false;
+    writeJson(RETRAIN_STATE_FILE, nextState);
+  }
+};
+
+const normalizeWinner = (score: any) => {
+  if (!score) return "draw";
+  const home = Number(score.home ?? score.homeScore ?? 0);
+  const away = Number(score.away ?? score.awayScore ?? 0);
+  if (home > away) return "home";
+  if (away > home) return "away";
+  return "draw";
+};
+
+const fetchLiveResults = async () => {
+  const bets = readJson(ACTIVE_BETS_FILE);
+  const now = Date.now();
+  const updated: any[] = [];
+
+  for (const bet of bets) {
+    if (!bet.kickoffTime) {
+      updated.push(bet);
+      continue;
+    }
+
+    const kickoff = new Date(bet.kickoffTime).getTime();
+    if (now < kickoff) {
+      updated.push(bet);
+      continue;
+    }
+
+    let matchData: any = null;
+    try {
+      if (process.env.FOOTBALL_DATA_API_KEY && bet.matchId) {
+        const response = await axios.get(`https://api.football-data.org/v4/matches/${bet.matchId}`, {
+          headers: { "X-Auth-Token": process.env.FOOTBALL_DATA_API_KEY }
+        });
+        matchData = response.data;
+      }
+    } catch (error) {
+      console.error("Football-Data live fetch error:", error);
+    }
+
+    if (!matchData && process.env.THE_ODDS_API_KEY) {
+      try {
+        const response = await axios.get("https://api.the-odds-api.com/v4/sports/soccer_epl/scores", {
+          params: { apiKey: process.env.THE_ODDS_API_KEY, daysFrom: 2 }
+        });
+        const found = Array.isArray(response.data) ? response.data.find((m: any) => String(m.id) === String(bet.matchId)) : null;
+        if (found) matchData = found;
+      } catch (error) {
+        console.error("Odds live fetch error:", error);
+      }
+    }
+
+    if (!matchData) {
+      updated.push(bet);
+      continue;
+    }
+
+    const status = String(matchData.status || matchData.match_status || "").toUpperCase();
+    const fullTime = matchData.score?.fullTime || matchData.score || {};
+    const homeScore = Number(fullTime.home ?? fullTime.homeScore ?? matchData.homeScore ?? 0);
+    const awayScore = Number(fullTime.away ?? fullTime.awayScore ?? matchData.awayScore ?? 0);
+    const winner = normalizeWinner({ home: homeScore, away: awayScore });
+    const predicted = String(bet.prediction || bet.predictedOutcome || "").toLowerCase();
+    const predictedProb = Number(bet.probability || bet.predictedProb || 0);
+    const actualOutcomeProb = winner === "home" ? 1 : 0;
+    const correct = (predicted.includes("home") && winner === "home") || (predicted.includes("away") && winner === "away") || (predicted.includes("draw") && winner === "draw");
+    const probabilityMiss = Math.abs(predictedProb - actualOutcomeProb);
+    const pnl = correct ? Number(bet.stake || 0) * (Number(bet.odds || 0) - 1) : -Number(bet.stake || 0);
+    const settledEntry = {
+      ...bet,
+      status: "settled",
+      finalScore: { home: homeScore, away: awayScore },
+      winner,
+      correct,
+      pnl,
+      probabilityMiss,
+      predictedProb,
+      actualOutcomeProb,
+      settledAt: new Date().toISOString()
+    };
+
+    appendResult(settledEntry);
+
+    if (probabilityMiss > 0.2) {
+      logPredictionError({
+        matchId: bet.matchId,
+        probabilityMiss,
+        predictedProb,
+        actualOutcomeProb,
+        settledAt: new Date().toISOString()
+      });
+    }
+
+    if (status === "FINISHED" || status === "FT" || status === "FULL_TIME" || status === "ENDED") {
+      continue;
+    }
+
+    updated.push(bet);
+  }
+
+  writeJson(ACTIVE_BETS_FILE, updated);
+  const results = readJson(RESULTS_FILE);
+  if (shouldRetrain(results)) {
+    await triggerRetrain();
+  }
+};
+
+setInterval(() => {
+  void fetchLiveResults().catch((error) => console.error("Live result tracker error:", error));
+}, MONITOR_INTERVAL_MS);
 
 async function startServer() {
   const app = express();
@@ -376,6 +590,33 @@ async function startServer() {
     } catch (error) {
       console.error("Backtest Error:", error);
       res.status(500).json({ error: "Internal Server Error" });
+    }
+  });
+
+  app.get("/api/performance/real-time", (req, res) => {
+    const metrics = readJson(PERFORMANCE_FILE);
+    res.json(metrics);
+  });
+
+  app.get("/api/results", (req, res) => {
+    res.json(readJson(RESULTS_FILE));
+  });
+
+  app.post("/api/errors", (req, res) => {
+    const payload = {
+      ...req.body,
+      createdAt: new Date().toISOString()
+    };
+    logPredictionError(payload);
+    res.json({ ok: true });
+  });
+
+  app.post("/api/retrain", async (req, res) => {
+    try {
+      await triggerRetrain();
+      res.json({ ok: true });
+    } catch (error: any) {
+      res.status(500).json({ ok: false, error: error.message });
     }
   });
 

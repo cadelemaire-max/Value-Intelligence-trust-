@@ -14,6 +14,7 @@ interface BettingContextType {
   activeBets: any[];
   betHistory: any[];
   performance: PerformanceMetrics | null;
+  results: any[];
   placeBet: (bet: any) => Promise<void>;
   refreshData: () => Promise<void>;
   isLoading: boolean;
@@ -24,6 +25,7 @@ const BettingContext = createContext<BettingContextType | undefined>(undefined);
 export const BettingProvider = ({ children }: { children: ReactNode }) => {
   const [activeBets, setActiveBets] = useState<any[]>([]);
   const [betHistory, setBetHistory] = useState<any[]>([]);
+  const [results, setResults] = useState<any[]>([]);
   const [performance, setPerformance] = useState<PerformanceMetrics | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -32,16 +34,19 @@ export const BettingProvider = ({ children }: { children: ReactNode }) => {
       const [activeRes, historyRes, perfRes] = await Promise.all([
         fetch('/api/bets/active'),
         fetch('/api/bets/history'),
-        fetch('/api/performance/real-time')
+        fetch('/api/performance/real-time'),
       ]);
+      const resultsRes = await fetch('/api/results');
 
       const active = await activeRes.json();
       const history = await historyRes.json();
       const perf = await perfRes.json();
+      const resultData = await resultsRes.json();
 
       setActiveBets(active);
       setBetHistory(history);
       setPerformance(perf);
+      setResults(resultData);
     } catch (error) {
       console.error("Error refreshing betting data:", error);
     } finally {
@@ -71,7 +76,7 @@ export const BettingProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   return (
-    <BettingContext.Provider value={{ activeBets, betHistory, performance, placeBet, refreshData, isLoading }}>
+    <BettingContext.Provider value={{ activeBets, betHistory, performance, results, placeBet, refreshData, isLoading }}>
       {children}
     </BettingContext.Provider>
   );
