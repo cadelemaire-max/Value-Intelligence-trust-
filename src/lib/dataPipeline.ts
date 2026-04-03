@@ -57,7 +57,7 @@ export class DataPipeline {
       : 1.2;
     
     return sorted.map((f, i) => {
-      // Calculate rolling averages (simplified for demo)
+      // Calculate rolling averages
       const homeHistory = sorted.slice(0, i).filter(h => h.home_team === f.home_team).slice(-this.windowSize);
       const awayHistory = sorted.slice(0, i).filter(h => h.away_team === f.away_team).slice(-this.windowSize);
       

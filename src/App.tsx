@@ -249,20 +249,20 @@ export default function App() {
   };
 
   const runBacktestSimulation = () => {
-    setBacktestResults(prev => ({ 
+    setBacktestResults(prev => ({
       roi: prev?.roi ?? 0,
       maxDrawdown: prev?.maxDrawdown ?? 0,
       brierScore: prev?.brierScore ?? 0,
       auc: prev?.auc ?? 0,
       calibrationData: prev?.calibrationData ?? [],
-      isSimulating: true 
+      isSimulating: true
     }));
-    const mockHistory = Array.from({ length: 100 }, () => ({ prob: 0.5 + Math.random() * 0.3, odds: 1.8 + Math.random() * 1.5, outcome: Math.random() > 0.4 ? 1 : 0 }));
+    const sourceHistory = contextHistory.length > 0 ? contextHistory : [];
     setTimeout(() => {
-      const roiSim = ValidationEngine.simulateROI(mockHistory, riskSettings.fractionalKelly);
-      const brier = ValidationEngine.calculateBrierScore(mockHistory.map(h => ({ prob: h.prob, outcome: h.outcome })));
-      const auc = ValidationEngine.calculateAUC(mockHistory.map(h => ({ prob: h.prob, outcome: h.outcome })));
-      const calibration = ValidationEngine.generateCalibrationData(mockHistory.map(h => ({ prob: h.prob, outcome: h.outcome })));
+      const roiSim = ValidationEngine.simulateROI(sourceHistory, riskSettings.fractionalKelly);
+      const brier = ValidationEngine.calculateBrierScore(sourceHistory.map(h => ({ prob: h.prob, outcome: h.outcome })));
+      const auc = ValidationEngine.calculateAUC(sourceHistory.map(h => ({ prob: h.prob, outcome: h.outcome })));
+      const calibration = ValidationEngine.generateCalibrationData(sourceHistory.map(h => ({ prob: h.prob, outcome: h.outcome })));
       setBacktestResults({ roi: roiSim.roi, maxDrawdown: roiSim.maxDrawdown, brierScore: brier, auc: auc, calibrationData: calibration, isSimulating: false });
     }, 1500);
   };
