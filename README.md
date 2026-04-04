@@ -20,3 +20,4 @@ View your app in AI Studio: https://ai.studio/apps/5691b3ad-2f86-4be1-ba05-136c8
    `npm run dev`
 # VIT
 # vit-predict
+# vit-predict
