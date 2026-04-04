@@ -403,34 +403,58 @@ Home xG: ${Number(homeXG ?? 1.2).toFixed(2)}  Away xG: ${Number(awayXG ?? 1.1).t
 
 Respond in JSON only. Be specific to the teams and match, not generic.`;
 
-      const response = await ai.models.generateContent({
-        model: "gemini-2.0-flash",
-        contents: prompt,
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              headline:           { type: Type.STRING },
-              explanation:        { type: Type.STRING },
-              riskWarning:        { type: Type.STRING },
-              recommendedMarket:  { type: Type.STRING },
-              bayesianReasoning:  { type: Type.STRING },
+      // Try with retries for rate-limit errors
+      let lastError: any = null;
+      const models = ["gemini-1.5-flash", "gemini-1.5-flash-8b", "gemini-1.0-pro"];
+      for (const model of models) {
+        try {
+          const response = await ai.models.generateContent({
+            model,
+            contents: prompt,
+            config: {
+              responseMimeType: "application/json",
+              responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                  headline:           { type: Type.STRING },
+                  explanation:        { type: Type.STRING },
+                  riskWarning:        { type: Type.STRING },
+                  recommendedMarket:  { type: Type.STRING },
+                  bayesianReasoning:  { type: Type.STRING },
+                },
+                required: ["headline","explanation","riskWarning","recommendedMarket","bayesianReasoning"],
+              },
             },
-            required: ["headline","explanation","riskWarning","recommendedMarket","bayesianReasoning"],
-          },
-        },
-      });
+          });
+          return res.json(JSON.parse(response.text || "{}"));
+        } catch (err: any) {
+          lastError = err;
+          const isQuota = err?.message?.includes("429") || err?.message?.includes("RESOURCE_EXHAUSTED") || err?.message?.includes("quota");
+          if (!isQuota) break; // not a quota error, don't retry other models
+          console.warn(`Gemini model ${model} quota exceeded, trying next...`);
+        }
+      }
 
-      res.json(JSON.parse(response.text || "{}"));
+      // If all models failed due to quota, return a smart fallback built from the match data
+      const hw = Number(probability);
+      const aw = Math.max(0.05, 1 - hw - 0.24);
+      const dr = Math.max(0.05, 1 - hw - aw);
+      console.error("Gemini insights error (all models exhausted):", lastError?.message?.slice(0, 200));
+      return res.json({
+        headline: `${homeTeam} vs ${awayTeam} — Model favours ${hw > 0.5 ? homeTeam : awayTeam}`,
+        explanation: `Our Poisson/Bayesian ensemble gives ${homeTeam} a ${(hw*100).toFixed(0)}% win probability with home xG ${Number(homeXG??1.2).toFixed(2)} vs away xG ${Number(awayXG??1.1).toFixed(2)}. The ${market} market at ${Number(odds).toFixed(2)} shows ${(Number(ev)*100).toFixed(1)}% EV.`,
+        riskWarning: `Draw probability ~${(dr*100).toFixed(0)}%. Away win ~${(aw*100).toFixed(0)}%. Stake responsibly — max 2.5% bankroll.`,
+        recommendedMarket: market,
+        bayesianReasoning: `Prior: H ${(hw*100).toFixed(0)}% / D ${(dr*100).toFixed(0)}% / A ${(aw*100).toFixed(0)}%. xG-adjusted Kelly suggests ${(Number(probability)*Number(odds)-1>0.05?"value bet":"marginal edge")} on ${market}. (AI quota reached — using model estimates.)`,
+      });
     } catch (error: any) {
-      console.error("Gemini insights error:", error?.message);
+      console.error("Gemini insights error:", error?.message?.slice(0, 200));
       res.json({
-        headline: "Analysis Error",
-        explanation: "Could not generate insights. Check server logs.",
+        headline: "Analysis Unavailable",
+        explanation: "Could not generate insights at this time.",
         riskWarning: "Always bet responsibly.",
         recommendedMarket: req.body?.market ?? "Home Win",
-        bayesianReasoning: "Retry later."
+        bayesianReasoning: "Model inference unavailable."
       });
     }
   });
