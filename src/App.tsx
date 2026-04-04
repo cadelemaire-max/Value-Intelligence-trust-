@@ -507,21 +507,24 @@ export default function App() {
 
   const leagueMapping: Record<string, string[]> = useMemo(() => ({
     'All': [],
-    'Premier League': ['premier-league', 'epl', 'premier league', 'england premier league'],
-    'La Liga': ['la-liga', 'laliga', 'la liga', 'spain la liga', 'laliga santander'],
-    'Bundesliga': ['bundesliga', 'germany bundesliga', '1. bundesliga'],
-    'Serie A': ['serie-a', 'serie a', 'italy serie a'],
-    'Ligue 1': ['ligue-1', 'ligue 1', 'france ligue 1'],
+    'Premier League': ['premier league', 'premier-league', 'epl', 'england premier league'],
+    'La Liga': ['la liga', 'la-liga', 'laliga', 'spain la liga', 'laliga santander', 'primera division', 'primera división'],
+    'Bundesliga': ['bundesliga', 'germany bundesliga', '1. bundesliga', '1.bundesliga'],
+    'Serie A': ['serie a', 'serie-a', 'italy serie a'],
+    'Ligue 1': ['ligue 1', 'ligue-1', 'france ligue 1', 'ligue1'],
     'Championship': ['championship', 'efl championship', 'england championship'],
-    'Champions League': ['champions-league', 'champions league', 'uefa champions league', 'ucl'],
+    'Champions League': ['champions league', 'champions-league', 'uefa champions league', 'ucl'],
     'Eredivisie': ['eredivisie', 'netherlands eredivisie', 'dutch eredivisie'],
     'MLS': ['mls', 'major league soccer', 'usa mls'],
+    'Primeira Liga': ['primeira liga', 'portugal primeira liga', 'liga portugal'],
+    'Brasileirao': ['brasileirao', 'brazil campeonato', 'série a', 'campeonato brasileiro'],
   }), []);
 
   const filteredSignals = useMemo(() => {
+    const normLeague = (v: string) => v.toLowerCase().replace(/[-_\s]+/g, ' ').trim();
     const filtered = signals.filter(s => {
-      const normalizedLeague = s.league.toLowerCase().replace(/\s+/g, '-');
-      const matchesLeague = activeLeague === 'All' || (leagueMapping[activeLeague] || [activeLeague.toLowerCase()]).some(l => normalizedLeague.includes(l));
+      const normalizedLeague = normLeague(s.league);
+      const matchesLeague = activeLeague === 'All' || (leagueMapping[activeLeague] || [activeLeague.toLowerCase()]).some(l => normalizedLeague.includes(normLeague(l)));
       const matchesSearch = s.homeTeam.toLowerCase().includes(searchTerm.toLowerCase()) || s.awayTeam.toLowerCase().includes(searchTerm.toLowerCase()) || s.league.toLowerCase().includes(searchTerm.toLowerCase());
       const matchesMarket = selectedMarkets.length === 0 || selectedMarkets.includes(s.market);
       return matchesLeague && matchesSearch && matchesMarket;
@@ -651,7 +654,7 @@ export default function App() {
                   </div>
 
                   <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide -mx-1 px-1">
-                    {['All','Premier League','La Liga','Bundesliga','Serie A','Ligue 1','Championship','Champions League','Eredivisie','MLS'].map((league) => (
+                    {Object.keys(leagueMapping).map((league) => (
                       <button key={league} onClick={() => setActiveLeague(league)} className={cn('px-4 py-2 rounded-full text-sm font-bold transition-all shrink-0', activeLeague === league ? 'bg-blue-600 text-white' : 'bg-slate-900 border border-slate-800 text-slate-400 hover:text-white')}>
                         {league}
                       </button>

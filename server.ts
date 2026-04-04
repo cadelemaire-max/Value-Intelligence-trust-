@@ -24,6 +24,12 @@ const ODDS_SPORTS = [
   "soccer_france_ligue_one",
   "soccer_england_championship",
   "soccer_uefa_champs_league",
+  "soccer_netherlands_eredivisie",
+  "soccer_usa_mls",
+  "soccer_portugal_primeira_liga",
+  "soccer_belgium_first_div",
+  "soccer_turkey_super_league",
+  "soccer_brazil_campeonato",
 ];
 
 const normalizeTeamName = (n: string) =>
@@ -640,30 +646,47 @@ Respond in JSON only. Be specific to the teams and match, not generic.`;
         // Fetch next 14 days across all supported competitions
         const dateFrom = new Date().toISOString().split('T')[0];
         const dateTo = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-        const competitions = ['PL', 'BL1', 'PD', 'SA', 'FL1', 'ELC', 'CL'];
+        // Competition codes → canonical league names matching the frontend leagueMapping
+        const competitions: Record<string, string> = {
+          'PL':  'Premier League',
+          'BL1': 'Bundesliga',
+          'PD':  'La Liga',
+          'SA':  'Serie A',
+          'FL1': 'Ligue 1',
+          'ELC': 'Championship',
+          'CL':  'Champions League',
+          'DED': 'Eredivisie',
+          'MLS': 'MLS',
+          'PPL': 'Primeira Liga',
+          'BSA': 'Brasileirao',
+        };
         
         const responses = await Promise.allSettled(
-          competitions.map(comp =>
+          Object.keys(competitions).map(comp =>
             axios.get(`https://api.football-data.org/v4/competitions/${comp}/matches`, {
               headers: { 'X-Auth-Token': apiKey },
-              params: { status: 'SCHEDULED,LIVE,IN_PLAY,FINISHED', dateFrom, dateTo }
+              params: { status: 'SCHEDULED,LIVE,IN_PLAY,FINISHED', dateFrom, dateTo },
+              timeout: 8000,
             })
           )
         );
 
+        const compCodes = Object.keys(competitions);
         const allMatches = responses
-          .filter((r): r is PromiseFulfilledResult<any> => r.status === 'fulfilled')
-          .flatMap(r => (r.value.data.matches || []))
-          .map((match: any) => ({
-            id: String(match.id),
-            homeTeam: match.homeTeam?.name || '',
-            awayTeam: match.awayTeam?.name || '',
-            league: match.competition?.name || '',
-            kickoffTime: match.utcDate,
-            status: match.status,
-            score: match.score?.fullTime || null,
-            odds: null
-          }))
+          .map((r, i) => ({ result: r, comp: compCodes[i] }))
+          .filter((x): x is { result: PromiseFulfilledResult<any>; comp: string } => x.result.status === 'fulfilled')
+          .flatMap(({ result, comp }) =>
+            (result.value.data.matches || []).map((match: any) => ({
+              id: String(match.id),
+              homeTeam: match.homeTeam?.name || match.homeTeam?.shortName || '',
+              awayTeam: match.awayTeam?.name || match.awayTeam?.shortName || '',
+              league: competitions[comp] || match.competition?.name || '',
+              kickoffTime: match.utcDate,
+              status: match.status,
+              score: match.score?.fullTime || null,
+              odds: null,
+            }))
+          )
           .filter(m => m.homeTeam && m.awayTeam);
 
         if (allMatches.length > 0) {
