@@ -132,7 +132,7 @@ const TelemetryBanner = ({ signals, performance, matches, loading }: any) => {
         <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Best signal</p>
         <div className="mt-4">
           <p className="text-lg font-black text-white">{topSignal ? `${topSignal.homeTeam} vs ${topSignal.awayTeam}` : 'Waiting for data'}</p>
-          <p className="text-sm text-slate-400 mt-2">{topSignal ? `${topSignal.market} · ${topSignal.league}` : 'Load live signals to see the strongest opportunity.'}</p>
+          <p className="text-sm text-slate-400 mt-2">{topSignal ? `${topSignal.market} · ${topSignal.league}` : 'No signals yet — live fixtures and odds will appear here once data loads.'}</p>
         </div>
       </div>
       <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6">
@@ -282,6 +282,7 @@ export default function App() {
   const [betslip, setBetslip] = useState<BetslipItem[]>([]);
   const [riskSettings, setRiskSettings] = useState<RiskSettings>({ bankroll: 1000, fractionalKelly: 0.25, maxBetPercentage: 0.05, minEdgeThreshold: 0.02, minConfidenceFloor: 0.65 });
   const [pipelineStatus, setPipelineStatus] = useState<{ lastRun: string; completeness: number; anomalies: number; isProcessing: boolean; }>({ lastRun: new Date().toISOString(), completeness: 99.8, anomalies: 2, isProcessing: false });
+  const [lastDataRefresh, setLastDataRefresh] = useState<string>(new Date().toISOString());
 
   const brierScore = realTimePerf?.brierScore || 0;
   const aucScore = realTimePerf?.auc || 0;
@@ -426,6 +427,7 @@ export default function App() {
           fixtures = await parseFixturesCSV('/all_fixtures.csv');
         }
         setSignals(fixtures);
+        setLastDataRefresh(new Date().toISOString());
 
         // ── Enrich signals with real bookmaker odds ──────────────────────
         try {
@@ -592,6 +594,7 @@ export default function App() {
     { label: 'Brier', value: (brierScore || 0).toFixed(3), tone: 'text-purple-400' },
     { label: 'AUC', value: (aucScore || 0).toFixed(3), tone: 'text-slate-200' },
   ];
+  const filteredCount = filteredSignals.length;
 
   return (
     <div className="flex min-h-screen bg-slate-950 text-white">
@@ -616,10 +619,13 @@ export default function App() {
                       <h2 className="text-3xl font-black text-white mt-2">Match telemetry</h2>
                       <p className="text-slate-400 mt-2 max-w-2xl">Browse live signals, compare teams, and open the detailed prediction view with Monte Carlo, Bayesian, and odds intelligence.</p>
                     </div>
-                    <div className="flex gap-3 items-center">
+                    <div className="flex gap-3 items-center flex-wrap">
                       <div className="relative">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 w-4 h-4" />
                         <input value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="Search teams..." className="pl-9 pr-4 py-3 rounded-2xl bg-slate-900 border border-slate-800 text-sm text-white focus:outline-none focus:border-blue-500 w-full md:w-72" />
+                      </div>
+                      <div className="text-xs text-slate-500">
+                        {filteredCount} signals · refreshed {new Date(lastDataRefresh).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                       </div>
                       <button className="p-3 rounded-2xl bg-slate-900 border border-slate-800 text-slate-400 hover:text-white hover:border-blue-500 transition-colors">
                         <Filter size={18} />
@@ -638,6 +644,7 @@ export default function App() {
                   <div className="h-px bg-slate-800" />
 
                   <div className="space-y-4">
+                    {filteredSignals.length === 0 && !loading && <div className="bg-slate-900 border border-slate-800 rounded-3xl p-10 text-center text-slate-400">No matches found. Try a different team, league, or market.</div>}
                     {loading ? <div className="grid grid-cols-1 gap-4">{[1,2,3,4].map(i => <FixtureSkeleton key={i} />)}</div> : visibleSignals.map((signal, index) => (
                       <FixtureItem key={signal.id} signal={signal} index={index} onClick={() => handleMatchClick(signal)} onQuickBet={() => handleQuickBet(signal)} />
                     ))}
