@@ -1,0 +1,153 @@
+Understood — the source code is already inside AI Studio. That changes the prompt again.
+
+Here's the final refined prompt assuming Gemini has direct access to your VIT (Value Intelligence Trust) source code in AI Studio, no screenshots needed.
+
+---
+
+🎯 Final Refined Prompt for Gemini AI Studio
+
+```
+You have direct access to my VIT (Value Intelligence Trust) platform source code running inside Google AI Studio.
+
+## Background
+
+VIT is a football betting prediction model. The platform already integrates:
+- **Odds API** (live odds, line movements, live scores)
+- **Football-Data.org** (fixtures, standings, H2H, results)
+- **Historical data** across 8 target leagues (multiple seasons)
+
+The current UI (screenshots I previously referenced) contains hardcoded mock data (EV ~184%, odds start at 1.95, H2H zeros, AUC-ROC 0.500 with ROI +12.4%). That's just front-end placeholder data — NOT how VIT is trained.
+
+## Your tasks
+
+### Task 1: Code review – confirm feature feasibility
+
+Review my source code and confirm if these features can be added. For each, state: YES/NO, effort (Low/Med/High), and what needs to change:
+
+1. Fractional Kelly stake sizing (0.25x multiplier)
+2. Bayesian update with dynamic H2H likelihood (not fixed 50%)
+3. EV shrinkage for small sample sizes (prevents +212% edges)
+4. League-average baseline for xG comparisons (replace fixed 1.2)
+5. Correlation-adjusted portfolio exposure
+6. Model ensemble with dynamic weights based on recent performance
+7. Calibrated confidence scores (not fixed 90% mock values)
+
+### Task 2: Identify what's lacking in current version
+
+Based on my actual source code (not screenshots):
+
+A) List all hardcoded/placeholder values that need replacement
+B) Identify calculation errors (e.g., AUC-ROC vs ROI contradiction root cause)
+C) Note missing data fields required for accurate VIT predictions
+D) Flag data pipeline gaps between APIs and VIT model
+E) Identify any functions that are stubbed/placeholder instead of production-ready
+
+### Task 3: Design real-time match result tracking
+
+The current VIT model cannot fetch live results automatically. Design a system that:
+
+**Requirements:**
+- Fetch real-time match results from kickoff time through final whistle
+- Compare VIT pre-match predictions vs actual outcomes immediately at full-time
+- Update accuracy metrics in real time: ROI, AUC-ROC, Brier score, Profit Factor
+- Flag prediction errors when probability miss >20%
+- Store results in historical database for future retraining
+- Trigger automatic VIT recalibration when accuracy drops below 55% over last 30 bets
+
+**Available APIs (already integrated):**
+- Odds API (live scores endpoint)
+- Football-Data.org (match status endpoint)
+
+**Output for Task 3:**
+
+A) Data flow diagram (text)
+B) Specific API endpoints to call
+C) Polling strategy (frequency: pre-match, in-play every 60s, post-match)
+D) Database schema changes (new tables/fields)
+E) Pseudocode for live result fetcher and accuracy updater
+F) Alerting mechanism (Slack/webhook)
+
+### Task 4: Implementation roadmap
+
+Provide a 3-phase plan specific to VIT codebase:
+
+| Phase | Duration | Focus | Specific files to change |
+|-------|----------|-------|--------------------------|
+| Phase 1 | Week 1-2 | Quick wins | [List files] |
+| Phase 2 | Week 3-4 | Core fixes | [List files] |
+| Phase 3 | Week 5-6 | Real-time tracking | [List files] |
+
+### Task 5: Generate production code
+
+Write three Python functions that integrate with my existing codebase:
+
+```python
+# Function 1: Live result fetcher
+def fetch_live_match_result(match_id, source="odds_api"):
+    """
+    Polls every 60 seconds from kickoff.
+    Returns: home_score, away_score, status, winner, final_timestamp
+    Handles rate limits, timeouts, logging.
+    """
+```
+
+```python
+# Function 2: VIT prediction vs actual comparator
+def compare_prediction_vs_actual(vit_output, actual_result, match_odds):
+    """
+    vit_output contains: predicted_outcome, probability, stake, odds_used
+    actual_result contains: final_score, winner
+    Returns: correct (bool), prob_error, pnl, updated_rolling_metrics
+    """
+```
+
+```python
+# Function 3: Retraining trigger
+def check_retrain_threshold(performance_history, threshold=0.55, window=30):
+    """
+    Returns: retrain_needed (bool), alert_payload, current_accuracy
+    """
+```
+
+Task 6: Summary table
+
+End with this summary:
+
+Category Current Issue (from code) Recommended Fix Priority File location
+Data quality [Your finding] [Fix] Critical [path]
+EV calculation [Your finding] [Fix] Critical [path]
+Bayesian update [Your finding] [Fix] High [path]
+Result tracking Missing Add real-time fetcher High New file
+Model monitoring [Your finding] [Fix] Medium [path]
+
+Important notes
+
+· VIT = Value Intelligence Trust (proprietary model)
+· You have full access to my source code in AI Studio
+· Do not ask me to upload screenshots — analyze the code directly
+· Be specific: reference actual function names, file paths, and line numbers where possible
+· Assume all API keys are already configured
+
+Begin your response with: "## VIT Code Review - Gemini Analysis"
+
+```
+
+---
+
+## ✅ What changed from previous version
+
+| Change | Why |
+|--------|-----|
+| Removed screenshot references | You said source code is already there |
+| Added "review my source code" | Gemini can analyze actual files in AI Studio |
+| Added "file paths and line numbers" | Forces specific, actionable feedback |
+| Added "functions that are stubbed" | Identifies placeholders hiding as real code |
+| Added "Specific files to change" in roadmap | Makes Phase 1-3 actionable |
+
+---
+
+## 🔁 Next step
+
+Paste this prompt directly into your AI Studio chat. Gemini will analyze your actual VIT source code and give you a line-by-line review.
+
+Do you want me to also write a **follow-up prompt** that asks Gemini to generate the full updated code files (not just pseudocode) after it identifies what needs to change?
