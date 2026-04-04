@@ -241,14 +241,23 @@ const fetchLiveResults = async () => {
     }
 
     if (!matchData && process.env.THE_ODDS_API_KEY) {
-      try {
-        const response = await axios.get("https://api.the-odds-api.com/v4/sports/soccer_epl/scores", {
-          params: { apiKey: process.env.THE_ODDS_API_KEY, daysFrom: 2 }
-        });
-        const found = Array.isArray(response.data) ? response.data.find((m: any) => String(m.id) === String(bet.matchId)) : null;
-        if (found) matchData = found;
-      } catch (error) {
-        console.error("Odds live fetch error:", error);
+      const scoreSports = ["soccer_epl","soccer_germany_bundesliga","soccer_spain_la_liga","soccer_italy_serie_a","soccer_france_ligue_one","soccer_england_championship","soccer_uefa_champs_league"];
+      for (const sport of scoreSports) {
+        if (matchData) break;
+        try {
+          const response = await axios.get(`https://api.the-odds-api.com/v4/sports/${sport}/scores`, {
+            params: { apiKey: process.env.THE_ODDS_API_KEY, daysFrom: 3 },
+            timeout: 5000,
+          });
+          const found = Array.isArray(response.data) ? response.data.find((m: any) =>
+            String(m.id) === String(bet.matchId) ||
+            (normalizeTeamName(m.home_team) === normalizeTeamName(bet.homeTeam || '') &&
+             normalizeTeamName(m.away_team) === normalizeTeamName(bet.awayTeam || ''))
+          ) : null;
+          if (found) matchData = found;
+        } catch (error) {
+          // silently continue to next sport
+        }
       }
     }
 
@@ -258,14 +267,46 @@ const fetchLiveResults = async () => {
     }
 
     const status = String(matchData.status || matchData.match_status || "").toUpperCase();
+    const isFinished = ["FINISHED", "FT", "FULL_TIME", "ENDED", "FINAL", "COMPLETED", "MATCH_FINISHED"].includes(status);
+
+    if (!isFinished) {
+      // Match is still in progress — keep in active bets unchanged
+      updated.push(bet);
+      continue;
+    }
+
     const fullTime = matchData.score?.fullTime || matchData.score || {};
     const homeScore = Number(fullTime.home ?? fullTime.homeScore ?? matchData.homeScore ?? 0);
     const awayScore = Number(fullTime.away ?? fullTime.awayScore ?? matchData.awayScore ?? 0);
     const winner = normalizeWinner({ home: homeScore, away: awayScore });
-    const predicted = String(bet.prediction || bet.predictedOutcome || "").toLowerCase();
+    const predicted = String(bet.prediction || bet.predictedOutcome || bet.market || "").toLowerCase();
     const predictedProb = Number(bet.probability || bet.predictedProb || 0);
-    const actualOutcomeProb = winner === "home" ? 1 : 0;
-    const correct = (predicted.includes("home") && winner === "home") || (predicted.includes("away") && winner === "away") || (predicted.includes("draw") && winner === "draw");
+    const totalGoals = homeScore + awayScore;
+
+    // Market-aware correctness
+    let correct = false;
+    if (predicted.includes("home win") || predicted === "home") {
+      correct = winner === "home";
+    } else if (predicted.includes("away win") || predicted === "away") {
+      correct = winner === "away";
+    } else if (predicted.includes("draw")) {
+      correct = winner === "draw";
+    } else if (predicted.includes("over 2.5") || predicted.includes("over2.5")) {
+      correct = totalGoals > 2;
+    } else if (predicted.includes("under 2.5") || predicted.includes("under2.5")) {
+      correct = totalGoals <= 2;
+    } else if (predicted.includes("btts") || predicted.includes("both teams")) {
+      correct = homeScore > 0 && awayScore > 0;
+    } else if (predicted.includes("1x") || predicted.includes("home/draw")) {
+      correct = winner === "home" || winner === "draw";
+    } else if (predicted.includes("x2") || predicted.includes("draw/away")) {
+      correct = winner === "away" || winner === "draw";
+    } else {
+      // Fallback to home win
+      correct = winner === "home";
+    }
+
+    const actualOutcomeProb = correct ? 1 : 0;
     const probabilityMiss = Math.abs(predictedProb - actualOutcomeProb);
     const pnl = correct ? Number(bet.stake || 0) * (Number(bet.odds || 0) - 1) : -Number(bet.stake || 0);
     const settledEntry = {
@@ -289,15 +330,11 @@ const fetchLiveResults = async () => {
         probabilityMiss,
         predictedProb,
         actualOutcomeProb,
+        market: bet.market,
         settledAt: new Date().toISOString()
       });
     }
-
-    if (status === "FINISHED" || status === "FT" || status === "FULL_TIME" || status === "ENDED") {
-      continue;
-    }
-
-    updated.push(bet);
+    // Don't push to updated — removes from active bets (match is finished)
   }
 
   writeJson(ACTIVE_BETS_FILE, updated);

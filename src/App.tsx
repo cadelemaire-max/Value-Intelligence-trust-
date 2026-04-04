@@ -507,12 +507,15 @@ export default function App() {
 
   const leagueMapping: Record<string, string[]> = useMemo(() => ({
     'All': [],
-    'Premier League': ['premier-league', 'epl', 'premier league'],
-    'La Liga': ['la-liga', 'laliga', 'la liga'],
-    'Bundesliga': ['bundesliga'],
-    'Serie A': ['serie-a', 'serie a'],
-    'Ligue 1': ['ligue-1', 'ligue 1'],
-    'Championship': ['championship']
+    'Premier League': ['premier-league', 'epl', 'premier league', 'england premier league'],
+    'La Liga': ['la-liga', 'laliga', 'la liga', 'spain la liga', 'laliga santander'],
+    'Bundesliga': ['bundesliga', 'germany bundesliga', '1. bundesliga'],
+    'Serie A': ['serie-a', 'serie a', 'italy serie a'],
+    'Ligue 1': ['ligue-1', 'ligue 1', 'france ligue 1'],
+    'Championship': ['championship', 'efl championship', 'england championship'],
+    'Champions League': ['champions-league', 'champions league', 'uefa champions league', 'ucl'],
+    'Eredivisie': ['eredivisie', 'netherlands eredivisie', 'dutch eredivisie'],
+    'MLS': ['mls', 'major league soccer', 'usa mls'],
   }), []);
 
   const filteredSignals = useMemo(() => {
@@ -596,6 +599,19 @@ export default function App() {
   ];
   const filteredCount = filteredSignals.length;
   const leagueCount = useMemo(() => new Set(signals.map(s => s.league)).size, [signals]);
+  const marketIntelligence = useMemo(() => {
+    const byMarket: Record<string, { count: number; totalEv: number; topEv: number }> = {};
+    filteredSignals.forEach(s => {
+      if (!byMarket[s.market]) byMarket[s.market] = { count: 0, totalEv: 0, topEv: -99 };
+      byMarket[s.market].count++;
+      byMarket[s.market].totalEv += s.ev;
+      byMarket[s.market].topEv = Math.max(byMarket[s.market].topEv, s.ev);
+    });
+    return Object.entries(byMarket)
+      .map(([market, d]) => ({ market, count: d.count, avgEv: d.totalEv / d.count, topEv: d.topEv }))
+      .sort((a, b) => b.avgEv - a.avgEv)
+      .slice(0, 5);
+  }, [filteredSignals]);
 
   return (
     <div className="flex min-h-screen bg-slate-950 text-white">
@@ -634,9 +650,9 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="flex flex-wrap gap-2">
-                    {['All','Premier League','La Liga','Bundesliga','Serie A','Ligue 1','Championship'].map((league) => (
-                      <button key={league} onClick={() => setActiveLeague(league)} className={cn('px-4 py-2 rounded-full text-sm font-bold transition-all', activeLeague === league ? 'bg-blue-600 text-white' : 'bg-slate-900 border border-slate-800 text-slate-400 hover:text-white')}>
+                  <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide -mx-1 px-1">
+                    {['All','Premier League','La Liga','Bundesliga','Serie A','Ligue 1','Championship','Champions League','Eredivisie','MLS'].map((league) => (
+                      <button key={league} onClick={() => setActiveLeague(league)} className={cn('px-4 py-2 rounded-full text-sm font-bold transition-all shrink-0', activeLeague === league ? 'bg-blue-600 text-white' : 'bg-slate-900 border border-slate-800 text-slate-400 hover:text-white')}>
                         {league}
                       </button>
                     ))}
@@ -647,7 +663,7 @@ export default function App() {
                   <div className="space-y-4">
                     {filteredSignals.length === 0 && !loading && <div className="bg-slate-900 border border-slate-800 rounded-3xl p-10 text-center text-slate-400">No matches found. Try a different team, league, or market.</div>}
                     {loading ? <div className="grid grid-cols-1 gap-4">{[1,2,3,4].map(i => <FixtureSkeleton key={i} />)}</div> : visibleSignals.map((signal, index) => (
-                      <FixtureItem key={signal.id} signal={signal} index={index} onClick={() => handleMatchClick(signal)} onQuickBet={() => handleQuickBet(signal)} />
+                      <FixtureItem key={signal.id} signal={signal} index={index} onClick={() => handleMatchClick(signal)} onPredict={() => handleMatchClick(signal)} />
                     ))}
                   </div>
                 </div>
@@ -655,24 +671,61 @@ export default function App() {
                 <div className="space-y-4">
                   <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6">
                     <div className="flex items-center justify-between mb-4">
-                      <h3 className="font-black text-white">Telemetry snapshot</h3>
+                      <h3 className="font-black text-white">Market intelligence</h3>
                       <span className="text-[10px] font-black uppercase tracking-widest text-green-400">Live</span>
                     </div>
-                    <div className="space-y-3">
-                      <div className="flex justify-between text-sm"><span className="text-slate-400">Current view</span><span className="text-white font-bold">{view}</span></div>
-                      <div className="flex justify-between text-sm"><span className="text-slate-400">Filtered signals</span><span className="text-white font-bold">{filteredSignals.length}</span></div>
-                      <div className="flex justify-between text-sm"><span className="text-slate-400">Pipeline completeness</span><span className="text-white font-bold">{pipelineStatus.completeness.toFixed(1)}%</span></div>
-                      <div className="flex justify-between text-sm"><span className="text-slate-400">Anomalies</span><span className="text-white font-bold">{pipelineStatus.anomalies}</span></div>
+                    <div className="space-y-2">
+                      {marketIntelligence.length === 0 ? (
+                        <p className="text-xs text-slate-500">Loading signals…</p>
+                      ) : marketIntelligence.map((m, i) => (
+                        <div key={m.market} className="flex items-center gap-2">
+                          <span className="text-[10px] font-black text-slate-500 w-4">{i + 1}</span>
+                          <div className="flex-1">
+                            <div className="flex justify-between items-center">
+                              <span className="text-xs font-bold text-white truncate">{m.market}</span>
+                              <span className={cn("text-xs font-black ml-2", m.avgEv >= 0 ? 'text-green-400' : 'text-red-400')}>
+                                {m.avgEv >= 0 ? '+' : ''}{(m.avgEv * 100).toFixed(1)}%
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2 mt-0.5">
+                              <div className="flex-1 h-1 bg-slate-800 rounded-full overflow-hidden">
+                                <div
+                                  className={cn("h-full rounded-full", m.avgEv >= 0 ? 'bg-green-500' : 'bg-red-500')}
+                                  style={{ width: `${Math.min(100, Math.abs(m.avgEv) * 500)}%` }}
+                                />
+                              </div>
+                              <span className="text-[10px] text-slate-500">{m.count}</span>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="mt-4 pt-4 border-t border-slate-800 space-y-2">
+                      <div className="flex justify-between text-sm"><span className="text-slate-400">Signals shown</span><span className="text-white font-bold">{filteredCount}</span></div>
+                      <div className="flex justify-between text-sm"><span className="text-slate-400">Leagues</span><span className="text-white font-bold">{leagueCount}</span></div>
+                      <div className="flex justify-between text-sm"><span className="text-slate-400">Pipeline</span><span className="text-green-400 font-bold">{pipelineStatus.completeness.toFixed(0)}%</span></div>
                     </div>
                   </div>
 
                   <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6">
-                    <h3 className="font-black text-white mb-4">Model mix</h3>
+                    <h3 className="font-black text-white mb-4">Top opportunities</h3>
                     <div className="space-y-3">
-                      <div className="flex justify-between text-sm"><span className="text-slate-400">Poisson</span><span className="text-green-400 font-bold">Ready</span></div>
-                      <div className="flex justify-between text-sm"><span className="text-slate-400">Bayesian</span><span className="text-blue-400 font-bold">Adaptive</span></div>
-                      <div className="flex justify-between text-sm"><span className="text-slate-400">Gemini</span><span className="text-purple-400 font-bold">Enabled</span></div>
-                      <div className="flex justify-between text-sm"><span className="text-slate-400">Telemetry</span><span className="text-white font-bold">Streaming</span></div>
+                      {filteredSignals.slice(0, 3).map((s, i) => (
+                        <button
+                          key={s.id}
+                          onClick={() => handleMatchClick(s)}
+                          className="w-full text-left hover:bg-slate-800/50 rounded-xl p-2 transition-colors group"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="text-xs font-bold text-white truncate">{s.homeTeam} vs {s.awayTeam}</p>
+                              <p className="text-[10px] text-slate-500">{s.market} · {s.league}</p>
+                            </div>
+                            <span className="text-xs font-black text-green-400 shrink-0">+{(s.ev * 100).toFixed(1)}%</span>
+                          </div>
+                        </button>
+                      ))}
+                      {filteredSignals.length === 0 && <p className="text-xs text-slate-500">No signals yet.</p>}
                     </div>
                   </div>
                 </div>

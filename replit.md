@@ -11,6 +11,14 @@ A full-stack application for football (soccer) match analysis, real-time probabi
 - **AI/ML**: Google Gemini (server-side proxy) + ml-random-forest (TypeScript)
 - **Data**: JSON/CSV files in `/data` + live APIs
 
+## Recent Changes (April 2026)
+
+- **Market Intelligence sidebar panel**: replaced Telemetry Snapshot with live EV breakdown by market type (top 5 markets by avg EV, bar chart, signal counts) plus a "Top Opportunities" card showing the top 3 clickable signals by EV.
+- **FT results settlement bug fixed**: `appendResult` now only fires when a match status is truly FINISHED (not on every poll cycle), preventing duplicate settled bet entries. Settlement logic is market-aware (Home Win, Away Win, Draw, BTTS, Over/Under 2.5, 1X, X2).
+- **Odds API multi-sport fallback**: FT settlement now scans all 7 major soccer sport keys (EPL, Bundesliga, La Liga, Serie A, Ligue 1, Championship, UCL) when fetching scores for bet settlement, not just `soccer_epl`. Also supports fuzzy team-name matching as fallback.
+- **FixtureItem rewritten**: PREDICT button replaces QUICK BET; per-card expandable AI insights panel; null-safe odds/EV/confidence display; live score in VS badge.
+- **League filter**: all 9 leagues scrollable, leagueMapping expanded, empty state messages added.
+
 The Express server serves the Vite frontend via middleware in development, and serves the built `dist/` folder in production. Both frontend and backend run on port 5000.
 
 ## Project Structure

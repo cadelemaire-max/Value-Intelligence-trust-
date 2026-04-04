@@ -1,0 +1,184 @@
+<div class="past-analyses-panel">
+    <div class="panel-header">
+        <h3>📋 Past Analyses</h3>
+        <div class="filter-bar">
+            <input type="text" id="searchInput" placeholder="🔍 Search team..." onkeyup="searchAnalyses()">
+            <select id="leagueFilter" onchange="filterByLeague()">
+                <option value="">All Leagues</option>
+                <option value="England Premier League">EPL</option>
+                <option value="Germany Bundesliga">Bundesliga</option>
+                <option value="Spain LaLiga">LaLiga</option>
+                <option value="Italy Serie A">Serie A</option>
+                <option value="France Ligue 1">Ligue 1</option>
+            </select>
+            <button onclick="refreshPastAnalyses()">🔄 Refresh</button>
+        </div>
+    </div>
+    
+    <div id="pastAnalysesList" class="analyses-list">
+        <div class="loading">Loading past analyses...</div>
+    </div>
+</div>
+
+<style>
+.past-analyses-panel {
+    background: white;
+    border-radius: 20px;
+    padding: 20px;
+    margin-top: 20px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+}
+
+.panel-header {
+    margin-bottom: 20px;
+    border-bottom: 2px solid #f0f0f0;
+    padding-bottom: 10px;
+}
+
+.filter-bar {
+    display: flex;
+    gap: 10px;
+    margin-top: 10px;
+}
+
+.filter-bar input, .filter-bar select {
+    padding: 8px 12px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    font-size: 14px;
+}
+
+.filter-bar button {
+    padding: 8px 16px;
+    background: #667eea;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+}
+
+.analyses-list {
+    max-height: 500px;
+    overflow-y: auto;
+}
+
+.analysis-card {
+    background: #f8f9fa;
+    border-radius: 12px;
+    padding: 15px;
+    margin-bottom: 10px;
+    cursor: pointer;
+    transition: all 0.2s;
+    border-left: 4px solid #667eea;
+}
+
+.analysis-card:hover {
+    transform: translateX(5px);
+    box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+}
+
+.analysis-card .match {
+    font-weight: bold;
+    font-size: 16px;
+    margin-bottom: 5px;
+}
+
+.analysis-card .details {
+    display: flex;
+    gap: 15px;
+    font-size: 12px;
+    color: #666;
+}
+
+.analysis-card .value-status {
+    font-weight: bold;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 11px;
+}
+
+.value-status.VALUE { background: #d4edda; color: #155724; }
+.value-status.NO-VALUE { background: #f8d7da; color: #721c24; }
+.value-status.LOW-VALUE { background: #fff3cd; color: #856404; }
+
+.loading {
+    text-align: center;
+    padding: 40px;
+    color: #666;
+}
+</style>
+
+<script>
+let pastAnalyses = [];
+
+async function loadPastAnalyses() {
+    try {
+        const response = await fetch('http://localhost:8000/past_analyses?limit=50');
+        const data = await response.json();
+        pastAnalyses = data;
+        renderAnalyses(pastAnalyses);
+    } catch (error) {
+        document.getElementById('pastAnalysesList').innerHTML = 
+            '<div class="loading">❌ Error loading analyses</div>';
+    }
+}
+
+function renderAnalyses(analyses) {
+    const container = document.getElementById('pastAnalysesList');
+    
+    if (!analyses || analyses.length === 0) {
+        container.innerHTML = '<div class="loading">📭 No past analyses found</div>';
+        return;
+    }
+    
+    container.innerHTML = analyses.map(a => `
+        <div class="analysis-card" onclick="loadMatchForPrediction('${a.match.replace(/'/g, "\\'")}')">
+            <div class="match">${a.match}</div>
+            <div class="details">
+                <span>🏆 ${a.league || 'Unknown'}</span>
+                <span>📅 ${a.date || 'No date'}</span>
+                <span>⚽ ${a.expected_score || 'N/A'}</span>
+                <span class="value-status ${a.value_status?.replace(' ', '-') || 'NO-VALUE'}">
+                    ${a.value_status || 'NO VALUE'}
+                </span>
+                <span>📊 EV: ${a.expected_value ? (a.expected_value * 100).toFixed(1) : '0'}%</span>
+            </div>
+        </div>
+    `).join('');
+}
+
+function searchAnalyses() {
+    const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+    const filtered = pastAnalyses.filter(a => 
+        a.match.toLowerCase().includes(searchTerm)
+    );
+    renderAnalyses(filtered);
+}
+
+function filterByLeague() {
+    const league = document.getElementById('leagueFilter').value;
+    if (!league) {
+        renderAnalyses(pastAnalyses);
+    } else {
+        const filtered = pastAnalyses.filter(a => a.league === league);
+        renderAnalyses(filtered);
+    }
+}
+
+function refreshPastAnalyses() {
+    loadPastAnalyses();
+}
+
+function loadMatchForPrediction(match) {
+    // Extract home and away from "Home vs Away" format
+    const [home, away] = match.split(' vs ');
+    if (home && away) {
+        document.getElementById('homeTeam').value = home.trim();
+        document.getElementById('awayTeam').value = away.trim();
+        runPrediction(); // Call your existing prediction function
+    }
+}
+
+// Load on page load
+document.addEventListener('DOMContentLoaded', loadPastAnalyses);
+</script>
