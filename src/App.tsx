@@ -182,6 +182,8 @@ export default function App() {
   const [isGeminiLoading, setIsGeminiLoading] = useState(false);
   const [mlPrediction, setMlPrediction] = useState<any>(null);
   const [liveOdds, setLiveOdds] = useState<any>(null);
+  const [mlTrained, setMlTrained] = useState<boolean | null>(null);
+  const [mlTraining, setMlTraining] = useState(false);
 
   const runMonteCarloSimulation = async () => {
     if (!selectedMatch) return;
@@ -267,10 +269,10 @@ export default function App() {
     }, 1500);
   };
 
-  const handleGeminiAsk = async (mode: 'thinking' | 'search' | 'general') => {
+  const handleGeminiAsk = async (_mode?: 'thinking' | 'search' | 'general') => {
     setIsGeminiLoading(true);
     setGeminiResponse('Thinking...');
-    const response = await askGemini(geminiPrompt, mode);
+    const response = await askGemini(geminiPrompt);
     setGeminiResponse(response);
     setIsGeminiLoading(false);
   };
@@ -424,6 +426,39 @@ export default function App() {
           fixtures = await parseFixturesCSV('/all_fixtures.csv');
         }
         setSignals(fixtures);
+
+        // ── Enrich signals with real bookmaker odds ──────────────────────
+        try {
+          const oddsRes = await fetch('/api/odds/live');
+          if (oddsRes.ok) {
+            const oddsData: any[] = await oddsRes.json();
+            if (Array.isArray(oddsData) && oddsData.length > 0) {
+              const normalize = (n: string) =>
+                n.toLowerCase().replace(/\s+(fc|sc|cf|afc)$/i, '').replace(/[^a-z0-9]/g, '');
+              setSignals(prev => prev.map(sig => {
+                const hn = normalize(sig.homeTeam);
+                const an = normalize(sig.awayTeam);
+                const entry = oddsData.find(o =>
+                  (o.homeTeamNorm === hn || o.homeTeamNorm?.includes(hn) || hn.includes(o.homeTeamNorm)) &&
+                  (o.awayTeamNorm === an || o.awayTeamNorm?.includes(an) || an.includes(o.awayTeamNorm))
+                );
+                if (!entry) return sig;
+                // Use the best available odds for the predicted market
+                const marketOdds = sig.market.toLowerCase().includes('home') ? entry.homeOdds
+                  : sig.market.toLowerCase().includes('away') ? entry.awayOdds
+                  : sig.market.toLowerCase().includes('draw') ? entry.drawOdds
+                  : entry.homeOdds;
+                if (!marketOdds) return sig;
+                const rawEV = (sig.probability * marketOdds) - 1;
+                const ev = Math.max(-0.15, Math.min(0.25, rawEV * 0.55));
+                return { ...sig, odds: parseFloat(marketOdds.toFixed(2)), ev: parseFloat(ev.toFixed(3)) };
+              }));
+              console.log(`Enriched signals with live odds from ${oddsData.length} bookmaker entries`);
+            }
+          }
+        } catch (oddsErr) {
+          console.warn('Could not enrich with live odds:', oddsErr);
+        }
       } catch (error) {
         console.error('Error loading data:', error);
       } finally {
@@ -431,6 +466,14 @@ export default function App() {
       }
     };
     loadData();
+  }, []);
+
+  // Check ML model status on mount
+  useEffect(() => {
+    fetch('/api/ml/status')
+      .then(r => r.json())
+      .then(d => setMlTrained(d.trained === true))
+      .catch(() => setMlTrained(false));
   }, []);
 
   // Auto-refresh fixture statuses every 60 seconds for live score updates
@@ -818,10 +861,10 @@ export default function App() {
                     <div className="space-y-2">
                       {[
                         { name: 'Poisson Model', status: 'Ready', color: 'text-green-400' },
-                        { name: 'Random Forest', status: 'Lazy init', color: 'text-blue-400' },
+                        { name: 'Random Forest', status: mlTrained === null ? 'Checking…' : mlTrained ? 'Trained ✓' : 'Not trained', color: mlTrained ? 'text-green-400' : 'text-yellow-400' },
                         { name: 'Bayesian Engine', status: 'Adaptive', color: 'text-blue-400' },
                         { name: 'Monte Carlo', status: '10k iterations', color: 'text-orange-400' },
-                        { name: 'Gemini AI', status: 'Enabled', color: 'text-purple-400' },
+                        { name: 'Gemini AI', status: 'Server proxy', color: 'text-purple-400' },
                       ].map(m => (
                         <div key={m.name} className="flex justify-between text-sm">
                           <span className="text-slate-400">{m.name}</span>
@@ -829,6 +872,26 @@ export default function App() {
                         </div>
                       ))}
                     </div>
+                    {!mlTrained && (
+                      <button
+                        onClick={async () => {
+                          setMlTraining(true);
+                          try {
+                            const res = await fetch('/api/ml/train', { method: 'POST' });
+                            const data = await res.json();
+                            setMlTrained(data.ok === true);
+                          } catch {
+                            setMlTrained(false);
+                          } finally {
+                            setMlTraining(false);
+                          }
+                        }}
+                        disabled={mlTraining}
+                        className="mt-3 w-full py-2 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-xs font-bold text-white transition-colors"
+                      >
+                        {mlTraining ? 'Training… (~20s)' : 'Activate ML Model'}
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>

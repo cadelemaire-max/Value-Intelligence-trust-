@@ -72,6 +72,10 @@ export class MLEngine {
     }
   }
 
+  get isTrained(): boolean {
+    return this.model !== null;
+  }
+
   public predict(homeTeam: string, awayTeam: string, homeXG: number, awayXG: number) {
     if (!this.model) {
       throw new Error("Model not trained");

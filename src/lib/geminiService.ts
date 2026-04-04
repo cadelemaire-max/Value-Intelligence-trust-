@@ -1,7 +1,4 @@
-import { GoogleGenAI, Type, ThinkingLevel } from "@google/genai";
 import { PredictionSignal } from "../types";
-
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
 
 export interface MatchInsights {
   headline: string;
@@ -11,33 +8,16 @@ export interface MatchInsights {
   bayesianReasoning: string;
 }
 
-export async function askGemini(prompt: string, mode: 'thinking' | 'search' | 'general' = 'general'): Promise<string> {
+export async function askGemini(prompt: string): Promise<string> {
   try {
-    if (mode === 'thinking') {
-      const response = await ai.models.generateContent({
-        model: "gemini-3.1-pro-preview",
-        contents: prompt,
-        config: {
-          thinkingConfig: { thinkingLevel: ThinkingLevel.HIGH },
-        },
-      });
-      return response.text || "No response.";
-    } else if (mode === 'search') {
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: prompt,
-        config: {
-          tools: [{ googleSearch: {} }],
-        },
-      });
-      return response.text || "No response.";
-    } else {
-      const response = await ai.models.generateContent({
-        model: "gemini-3.1-flash-lite-preview",
-        contents: prompt,
-      });
-      return response.text || "No response.";
-    }
+    const res = await fetch("/api/gemini/insights", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt }),
+    });
+    if (!res.ok) return "Error communicating with Gemini.";
+    const data = await res.json();
+    return data.explanation || data.headline || "No response.";
   } catch (error) {
     console.error("Gemini API error:", error);
     return "Error communicating with Gemini.";
@@ -46,44 +26,23 @@ export async function askGemini(prompt: string, mode: 'thinking' | 'search' | 'g
 
 export const getMatchInsights = async (signal: PredictionSignal): Promise<MatchInsights> => {
   try {
-    const prompt = `
-        Analyze the following football match prediction and provide insights:
-        Home Team: ${signal.homeTeam}
-        Away Team: ${signal.awayTeam}
-        League: ${signal.league}
-        Market: ${signal.market}
-        Probability: ${(signal.probability * 100).toFixed(1)}%
-        Odds: ${signal.odds}
-        Expected Value (EV): ${(signal.ev * 100).toFixed(1)}%
-        
-        Provide:
-        1. A catchy headline for this bet.
-        2. A brief explanation of why this is a good bet.
-        3. A risk warning.
-        4. A recommended market (can be the same or different).
-        5. A Bayesian update reasoning: Explain how the current probability (prior) might be updated given the match context (H2H, form, etc.).
-      `;
-
-    const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            headline: { type: Type.STRING },
-            explanation: { type: Type.STRING },
-            riskWarning: { type: Type.STRING },
-            recommendedMarket: { type: Type.STRING },
-            bayesianReasoning: { type: Type.STRING },
-          },
-          required: ["headline", "explanation", "riskWarning", "recommendedMarket", "bayesianReasoning"],
-        },
-      },
+    const res = await fetch("/api/gemini/insights", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        homeTeam: signal.homeTeam,
+        awayTeam: signal.awayTeam,
+        league: signal.league,
+        market: signal.market,
+        probability: signal.probability,
+        odds: signal.odds,
+        ev: signal.ev,
+        homeXG: signal.homeXG,
+        awayXG: signal.awayXG,
+      }),
     });
-
-    return JSON.parse(response.text || "{}");
+    if (!res.ok) throw new Error("Server error");
+    return await res.json();
   } catch (error) {
     console.error("Failed to generate Gemini insights:", error);
     return {
@@ -91,7 +50,7 @@ export const getMatchInsights = async (signal: PredictionSignal): Promise<MatchI
       explanation: "Could not generate insights at this time.",
       riskWarning: "Always bet responsibly.",
       recommendedMarket: signal.market,
-      bayesianReasoning: "Bayesian analysis unavailable."
+      bayesianReasoning: "Bayesian analysis unavailable.",
     };
   }
 };

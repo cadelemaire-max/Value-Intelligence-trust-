@@ -9,6 +9,66 @@ import fs from "fs";
 import axios from "axios";
 import Papa from "papaparse";
 import { mlEngine } from "./src/lib/mlEngine.ts";
+import { GoogleGenAI, Type } from "@google/genai";
+
+// ─── Live odds cache (refreshes every 5 min) ────────────────────────────────
+let oddsCache: any[] = [];
+let oddsCacheAt = 0;
+const ODDS_TTL = 5 * 60 * 1000;
+
+const ODDS_SPORTS = [
+  "soccer_epl",
+  "soccer_germany_bundesliga",
+  "soccer_spain_la_liga",
+  "soccer_italy_serie_a",
+  "soccer_france_ligue_one",
+  "soccer_england_championship",
+  "soccer_uefa_champs_league",
+];
+
+const normalizeTeamName = (n: string) =>
+  n.toLowerCase().replace(/\s+(fc|sc|cf|afc|united|city|town|rovers|wanderers|athletic|albion|hotspur|wednesday|united)$/i, "").replace(/[^a-z0-9]/g, "");
+
+const fetchLiveOdds = async (): Promise<any[]> => {
+  const key = process.env.THE_ODDS_API_KEY;
+  if (!key) return [];
+  if (oddsCache.length > 0 && Date.now() - oddsCacheAt < ODDS_TTL) return oddsCache;
+
+  const responses = await Promise.allSettled(
+    ODDS_SPORTS.map(sport =>
+      axios.get(`https://api.the-odds-api.com/v4/sports/${sport}/odds`, {
+        params: { apiKey: key, regions: "eu", markets: "h2h", oddsFormat: "decimal" },
+        timeout: 8000,
+      })
+    )
+  );
+
+  const all = responses
+    .filter((r): r is PromiseFulfilledResult<any> => r.status === "fulfilled")
+    .flatMap(r => r.value.data || []);
+
+  const normalized = all.map((match: any) => {
+    const h2h = match.bookmakers?.[0]?.markets?.find((m: any) => m.key === "h2h");
+    if (!h2h) return null;
+    const home = h2h.outcomes.find((o: any) => o.name !== "Draw" && o.name === match.home_team);
+    const away = h2h.outcomes.find((o: any) => o.name !== "Draw" && o.name === match.away_team);
+    const draw = h2h.outcomes.find((o: any) => o.name === "Draw");
+    return {
+      homeTeam: match.home_team,
+      awayTeam: match.away_team,
+      commenceTime: match.commence_time,
+      homeOdds: home?.price ?? null,
+      drawOdds: draw?.price ?? null,
+      awayOdds: away?.price ?? null,
+      homeTeamNorm: normalizeTeamName(match.home_team),
+      awayTeamNorm: normalizeTeamName(match.away_team),
+    };
+  }).filter(Boolean);
+
+  oddsCache = normalized;
+  oddsCacheAt = Date.now();
+  return normalized;
+};
 
 const execPromise = util.promisify(exec);
 
@@ -260,6 +320,102 @@ async function startServer() {
   // API Routes
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });
+  });
+
+  /**
+   * Live bookmaker odds from The Odds API (h2h, EU region, cached 5 min)
+   */
+  app.get("/api/odds/live", async (req, res) => {
+    try {
+      const data = await fetchLiveOdds();
+      res.json(data);
+    } catch (error) {
+      console.error("Odds API error:", error);
+      res.json([]);
+    }
+  });
+
+  /**
+   * Gemini AI match insights — server-side proxy so key stays secret
+   */
+  app.post("/api/gemini/insights", async (req, res) => {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      return res.json({
+        headline: "AI Key Not Configured",
+        explanation: "Add a GEMINI_API_KEY secret to enable AI match analysis.",
+        riskWarning: "Always bet responsibly.",
+        recommendedMarket: req.body?.market ?? "Home Win",
+        bayesianReasoning: "Set GEMINI_API_KEY in Secrets to unlock Bayesian narrative."
+      });
+    }
+
+    try {
+      const { homeTeam, awayTeam, league, market, probability, odds, ev, homeXG, awayXG } = req.body;
+      const ai = new GoogleGenAI({ apiKey });
+
+      const prompt = `You are a professional football betting analyst. Analyze this upcoming match prediction data and give sharp, concise insights.
+
+Match: ${homeTeam} vs ${awayTeam}
+League: ${league}
+Recommended Market: ${market}
+Model Probability: ${(Number(probability) * 100).toFixed(1)}%
+Market Odds: ${Number(odds).toFixed(2)}
+Expected Value: ${(Number(ev) * 100).toFixed(1)}%
+Home xG: ${Number(homeXG ?? 1.2).toFixed(2)}  Away xG: ${Number(awayXG ?? 1.1).toFixed(2)}
+
+Respond in JSON only. Be specific to the teams and match, not generic.`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-2.0-flash",
+        contents: prompt,
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              headline:           { type: Type.STRING },
+              explanation:        { type: Type.STRING },
+              riskWarning:        { type: Type.STRING },
+              recommendedMarket:  { type: Type.STRING },
+              bayesianReasoning:  { type: Type.STRING },
+            },
+            required: ["headline","explanation","riskWarning","recommendedMarket","bayesianReasoning"],
+          },
+        },
+      });
+
+      res.json(JSON.parse(response.text || "{}"));
+    } catch (error: any) {
+      console.error("Gemini insights error:", error?.message);
+      res.json({
+        headline: "Analysis Error",
+        explanation: "Could not generate insights. Check server logs.",
+        riskWarning: "Always bet responsibly.",
+        recommendedMarket: req.body?.market ?? "Home Win",
+        bayesianReasoning: "Retry later."
+      });
+    }
+  });
+
+  /**
+   * ML Model Status + On-Demand Training
+   */
+  app.get("/api/ml/status", (req, res) => {
+    res.json({ trained: mlEngine.isTrained });
+  });
+
+  app.post("/api/ml/train", async (req, res) => {
+    const csvPath = path.join(__dirname, "data", "enriched_historical.csv");
+    if (!fs.existsSync(csvPath)) {
+      return res.status(404).json({ ok: false, error: "No training data found at data/enriched_historical.csv" });
+    }
+    try {
+      await mlEngine.train(csvPath);
+      res.json({ ok: true, message: "ML model trained successfully." });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e.message });
+    }
   });
 
   /**
@@ -889,7 +1045,15 @@ async function startServer() {
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
-    console.log(`ML model will train on first prediction request.`);
+
+    // ── Background: pre-warm odds cache ──────────────────────────────────
+    if (process.env.THE_ODDS_API_KEY) {
+      setImmediate(() => {
+        fetchLiveOdds()
+          .then(d => console.log(`✅ Odds cache warmed: ${d.length} fixtures`))
+          .catch(e => console.warn("⚠️  Odds cache warm failed:", e?.message));
+      });
+    }
   });
 }
 
