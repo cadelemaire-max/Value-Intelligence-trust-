@@ -595,6 +595,7 @@ export default function App() {
     { label: 'AUC', value: (aucScore || 0).toFixed(3), tone: 'text-slate-200' },
   ];
   const filteredCount = filteredSignals.length;
+  const leagueCount = useMemo(() => new Set(signals.map(s => s.league)).size, [signals]);
 
   return (
     <div className="flex min-h-screen bg-slate-950 text-white">
@@ -625,7 +626,7 @@ export default function App() {
                         <input value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="Search teams..." className="pl-9 pr-4 py-3 rounded-2xl bg-slate-900 border border-slate-800 text-sm text-white focus:outline-none focus:border-blue-500 w-full md:w-72" />
                       </div>
                       <div className="text-xs text-slate-500">
-                        {filteredCount} signals · refreshed {new Date(lastDataRefresh).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        {filteredCount} signals · {leagueCount} leagues · refreshed {new Date(lastDataRefresh).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                       </div>
                       <button className="p-3 rounded-2xl bg-slate-900 border border-slate-800 text-slate-400 hover:text-white hover:border-blue-500 transition-colors">
                         <Filter size={18} />
