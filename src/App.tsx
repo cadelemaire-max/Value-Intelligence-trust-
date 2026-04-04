@@ -732,6 +732,22 @@ export default function App() {
               </div>
             </motion.div>
           )}
+          {view === 'detail' && selectedMatch && (
+            <motion.div key="detail" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="max-w-7xl mx-auto">
+              <MatchDetailView
+                selectedMatch={selectedMatch}
+                matchData={matchData}
+                historicalMatches={historicalMatches}
+                monteCarloResult={monteCarloResult}
+                matchInsights={matchInsights}
+                isSimulating={isSimulating}
+                mlPrediction={mlPrediction}
+                liveOdds={liveOdds}
+                onRunSimulation={runMonteCarloSimulation}
+                onBack={() => setView('fixtures')}
+              />
+            </motion.div>
+          )}
           {view === 'portfolio' && (
             <motion.div key="portfolio" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="max-w-6xl mx-auto space-y-8">
               <div className="flex items-center justify-between">
